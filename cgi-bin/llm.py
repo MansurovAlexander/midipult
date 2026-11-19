@@ -311,7 +311,8 @@ def fetch_models(profile, provider=None, requested_base=None):
                 base_url + "/models",
                 headers={"Authorization": "Bearer " + key,
                          "User-Agent": USER_AGENT})
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with common.open_url(request, timeout=20, allow_http=True,
+                                 allow_private=True, allow_loopback=True, same_host=True) as response:
                 data = json.loads(response.read(1024 * 1024).decode("utf-8", "replace"))
             items = data.get("data") if isinstance(data, dict) else None
             ids = sorted({str(item.get("id")) for item in (items or [])
@@ -326,7 +327,8 @@ def fetch_models(profile, provider=None, requested_base=None):
             request = urllib.request.Request(
                 "https://api.aitunnel.ru/public/aitunnel/models",
                 headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with common.open_url(request, timeout=20, allow_http=True,
+                                 allow_private=True, allow_loopback=True, same_host=True) as response:
                 data = json.loads(response.read(2 * 1024 * 1024).decode("utf-8", "replace"))
             chat = data.get("chat") if isinstance(data, dict) else None
             if isinstance(chat, dict) and chat:
@@ -561,7 +563,8 @@ def ask(prompt, system=None):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=90) as response:
+        with common.open_url(request, timeout=90, allow_http=True,
+                             allow_private=True, allow_loopback=True, same_host=True) as response:
             body = read_json_response(response)
     except urllib.error.HTTPError as exc:
         raw = ""

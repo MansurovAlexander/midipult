@@ -47,17 +47,28 @@ MAX_ARCHIVE = 50 * 1024 * 1024
 ASSET_HOSTS = frozenset({
     "github.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
     "codeload.github.com",
 })
+API_HOSTS = frozenset({"api.github.com"})
+
+
+def _github_guard(url, hosts, message):
+    parsed = urllib.parse.urlsplit(str(url or "").strip())
+    if parsed.scheme != "https" or parsed.hostname not in hosts:
+        raise ValueError(message)
+    return common.url_guard(url, allow_http=False, allow_private=False,
+                           allow_loopback=False)
 
 
 def asset_guard(url):
     """Только https и только хосты GitHub для архива/SHA."""
-    parsed = urllib.parse.urlsplit(str(url or "").strip())
-    if parsed.scheme != "https" or parsed.hostname not in ASSET_HOSTS:
-        raise ValueError("недопустимый хост обновления")
-    return common.url_guard(url, allow_http=False, allow_private=False,
-                           allow_loopback=False)
+    return _github_guard(url, ASSET_HOSTS, "недопустимый хост обновления")
+
+
+def api_guard(url):
+    """Только https и только api.github.com для запроса релизов."""
+    return _github_guard(url, API_HOSTS, "недопустимый хост API GitHub")
 
 
 # --------------------------------------------------------------------------- #
@@ -131,7 +142,7 @@ def fetch_release():
             "Accept": "application/vnd.github+json",
         },
     )
-    with common.open_url(request, timeout=15, guard=asset_guard) as response:
+    with common.open_url(request, timeout=15, guard=api_guard) as response:
         data = json.loads(response.read().decode("utf-8"))
     items = data if isinstance(data, list) else [data]
     release = pick_panel_release(items)

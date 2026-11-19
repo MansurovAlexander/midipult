@@ -371,6 +371,17 @@ def test_url_guard():
           redirect_bad("http://169.254.169.254/", allow_http=True,
                        allow_private=True, allow_loopback=True))
 
+    handler = common.GuardedRedirectHandler(lambda url: url,
+                                            expected_host="api.example.com")
+    request = urllib.request.Request("https://api.example.com/v1")
+    try:
+        handler.redirect_request(request, None, 302, "Found", {},
+                                 "https://evil.example/")
+        same_host_rejected = False
+    except ValueError:
+        same_host_rejected = True
+    check("ssrf: redirect на другой хост запрещён", same_host_rejected)
+
 
 def test_update_assets():
     def bad(url):
@@ -382,6 +393,31 @@ def test_update_assets():
 
     check("update: http-архив запрещён", bad("http://github.com/x.tar.gz"))
     check("update: чужой хост запрещён", bad("https://evil.example/x.tar.gz"))
+
+    old_guard = update.common.url_guard
+    try:
+        update.common.url_guard = lambda url, **kwargs: url
+        check("update: api.github.com разрешён",
+              update.api_guard("https://api.github.com/repos/x/y/releases")
+              == "https://api.github.com/repos/x/y/releases")
+        check("update: release-assets разрешён",
+              update.asset_guard(
+                  "https://release-assets.githubusercontent.com/x.tar.gz")
+              == "https://release-assets.githubusercontent.com/x.tar.gz")
+    finally:
+        update.common.url_guard = old_guard
+
+    def api_bad(url):
+        try:
+            update.api_guard(url)
+            return False
+        except ValueError:
+            return True
+
+    check("update: api_guard не пускает github.com",
+          api_bad("https://github.com/x"))
+    check("update: api_guard не пускает http",
+          api_bad("http://api.github.com/x"))
 
 
 def test_state_player_fresh():
@@ -990,44 +1026,44 @@ def test_llm_errors_and_models():
         def __exit__(self, *args):
             return False
 
-    original = llm.urllib.request.urlopen
+    original = common.open_url
 
-    def fake_public(request, timeout=20):
+    def fake_public(request, timeout=20, **kwargs):
         return FakeResponse(json_mod.dumps({"chat": {"model-a": {}, "model-b": {}}}).encode("utf-8"))
 
     try:
-        llm.urllib.request.urlopen = fake_public
+        common.open_url = fake_public
         models, source = llm.fetch_models({"provider": "aitunnel", "key": ""}, "aitunnel", "")
         check("модели: публичный каталог без ключа",
               source == "public" and models == ["model-a", "model-b"], str((source, models)))
     finally:
-        llm.urllib.request.urlopen = original
+        common.open_url = original
 
-    def fake_key(request, timeout=20):
+    def fake_key(request, timeout=20, **kwargs):
         return FakeResponse(json_mod.dumps({"data": [{"id": "m1"}, {"id": "m2"}]}).encode("utf-8"))
 
     try:
-        llm.urllib.request.urlopen = fake_key
+        common.open_url = fake_key
         models, source = llm.fetch_models(
             {"provider": "aitunnel", "key": "k", "base_url": "https://api.aitunnel.ru/v1"},
             "aitunnel", "")
         check("модели: по ключу", source == "key" and models == ["m1", "m2"],
               str((source, models)))
     finally:
-        llm.urllib.request.urlopen = original
+        common.open_url = original
 
-    def fake_fail(request, timeout=20):
+    def fake_fail(request, timeout=20, **kwargs):
         raise urllib.error.URLError("no net")
 
     try:
-        llm.urllib.request.urlopen = fake_fail
+        common.open_url = fake_fail
         models, source = llm.fetch_models({"provider": "openrouter", "key": ""},
                                           "openrouter", "")
         check("модели: встроенный fallback",
               source == "builtin" and models == llm.PROVIDERS["openrouter"]["models"],
               str((source, models)))
     finally:
-        llm.urllib.request.urlopen = original
+        common.open_url = original
 
 
 def test_llm_response_parsing():

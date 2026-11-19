@@ -282,6 +282,8 @@ def ensure_binary():
     url = common.url_guard(url, allow_http=False, allow_private=False,
                            allow_loopback=False)
     code, _, err = common.run(["/opt/bin/curl", "-L", "-f", "-s", "-m", "180",
+                               "--proto", "=https", "--proto-redir", "=https",
+                               "--max-redirs", "3",
                                "-o", archive, url], timeout=200)
     if code != 0 or not os.path.exists(archive):
         raise RuntimeError("не скачался sing-box: %s" % (err or code))
