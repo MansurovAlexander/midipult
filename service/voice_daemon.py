@@ -174,8 +174,8 @@ ALICE_MEDIA_WORDS = ("музык", "трек", "песн", "альбом", "пл
 ALICE_PLAYER_WORDS = ("пауза", "продолж", "следующ", "предыдущ", "перемот",
                       "отмот", "промот", "дальше", "назад", "вперед",
                       "играй", "играть", "поставь", "включи", "выключи",
-                      "вруби", "стоп", "останов", "громче", "тише",
-                      "громкость", "звук", "что играет")
+                      "вруби", "стоп", "останов", "громче", "погромче",
+                      "тише", "потише", "громкость", "звук")
 RADIO_LIST = ("какие радио", "какие станции", "список радио", "перечисли радио",
               "что за радио", "какие есть радио", "какие радиостанции",
               "какие радио ты знаешь", "какие радиостанции ты знаешь",
@@ -189,25 +189,66 @@ def has_any(text, words):
     return any(word in text for word in words)
 
 
+FILLER_WORDS = frozenset({
+    "пожалуйста", "пожалйста", "плиз", "пжлст", "ну", "слушай", "давай",
+    "сделай", "будь", "добра", "а", "и", "но", "так", "скажи",
+})
+
+QUESTION_WORDS = frozenset({
+    "как", "можно", "что", "почему", "зачем", "где", "когда",
+    "какой", "какая", "какие", "какое", "подскажи", "расскажи", "объясни",
+    "включен", "выключен", "работает", "правда", "разве", "неужели",
+})
+
+
+def strip_fillers(low):
+    """Убрать вводные слова, чтобы «пожалуйста, следующий» оставался командой."""
+    words = low.split()
+    while words and words[0] in FILLER_WORDS:
+        words.pop(0)
+    return " ".join(words)
+
+
+def is_question(text, low):
+    """Вопрос, а не императив. «?» после normalize теряется, поэтому смотрим raw."""
+    if str(text or "").strip().endswith("?"):
+        return True
+    words = low.split()
+    if not words:
+        return False
+    if "ли" in words or "разве" in words or "неужели" in words:
+        return True
+    return words[0] in QUESTION_WORDS
+
+
 def alice_owns(text):
     """Команды, которые должна обрабатывать штатная Алиса, а не LLM."""
-    low = normalize(text)
+    low = strip_fillers(normalize(text))
     if not low:
         return False
     if has_any(low, ALICE_MEDIA_WORDS):
         return True
+    if low in ("что играет", "что сейчас играет") or low.startswith("что играет сейчас"):
+        return True
+    # Только начало фразы: «как включить впн» — вопрос для LLM, а не плеер.
     return any(low.startswith(word) for word in ALICE_PLAYER_WORDS)
 
 
 def match(text):
     """Вернуть (kind, action) или None. kind: vpn/llm/light."""
-    low = normalize(text)
+    low = strip_fillers(normalize(text))
     if not low:
         return None
 
     # «какие радио ты знаешь» — перечисляем станции, это важнее on/off
     if has_any(low, RADIO_LIST):
         return ("radio_list", "list")
+
+    # «как включить впн» и «можно ли выключить нейросеть» — вопросы, не команды.
+    # Императив в начале («включи впн?») по-прежнему разрешён.
+    imperative = any(low.startswith(word) for word in ON_WORDS + OFF_WORDS)
+    if not imperative and is_question(text, low):
+        return None
 
     # сначала выключение: «выключи» содержит «ключи», порядок важен
     off = has_any(low, OFF_WORDS)
@@ -419,11 +460,17 @@ def chat_select_by_name(name):
     return True
 
 
-def llm_switch(text):
-    low = normalize(text)
+def llm_switch(text, dry_run=False):
+    """Переключение LLM/чата. dry_run проверяет сценарий без POST и озвучки."""
+    low = strip_fillers(normalize(text))
+    question = is_question(text, low)
 
     command = parse_chat_command(text)
     if command:
+        if question:
+            return False
+        if dry_run:
+            return True
         kind, name = command
         if kind == "create":
             return chat_create(name)
@@ -435,11 +482,18 @@ def llm_switch(text):
     if "чат" in low:
         info = llm_info()
         if "какой чат" in low or "текущий чат" in low:
+            if dry_run:
+                return True
             announce("Сейчас " + str(info.get("active_chat_name") or "чат"))
             return True
+        if question:
+            # «можно ли удалить чат?» — не команда.
+            return False
         if "удал" in low or "закрой" in low:
             if not info.get("active_chat"):
                 return False
+            if dry_run:
+                return True
             try:
                 post(BASE + "/cgi-bin/llm.py",
                      {"chat_delete": info.get("active_chat")}, timeout=15)
@@ -458,6 +512,8 @@ def llm_switch(text):
         else:
             payload = None
         if payload:
+            if dry_run:
+                return True
             try:
                 post(BASE + "/cgi-bin/llm.py", payload, timeout=15)
                 info = llm_info()
@@ -469,12 +525,30 @@ def llm_switch(text):
                 log("chat switch error: %s" % exc)
                 return False
 
+    if any(phrase in low for phrase in ("какая нейросеть", "что за нейросеть", "какой профиль")):
+        if dry_run:
+            return True
+        info = llm_info()
+        active = info.get("active_name")
+        if info.get("enabled") and active:
+            announce("Сейчас включена нейросеть " + str(active))
+        elif active:
+            announce("Нейросеть выключена. Активный профиль: " + str(active))
+        else:
+            announce("Профили нейросети не настроены")
+        return True
+
+    if question:
+        return False
+
     if not any(word in low for word in
                ("нейросет", "профил", "переключ", "включ", "выключ", "отключ", "запуст")):
         return False
 
     profile = llm_profile_target(low)
     if profile:
+        if dry_run:
+            return True
         off = any(word in low for word in ("выключ", "отключ", "стоп"))
         try:
             if off:
@@ -494,16 +568,6 @@ def llm_switch(text):
             log("llm switch error: %s" % exc)
             return False
 
-    if any(phrase in low for phrase in ("какая нейросеть", "что за нейросеть", "какой профиль")):
-        info = llm_info()
-        active = info.get("active_name")
-        if info.get("enabled") and active:
-            announce("Сейчас включена нейросеть " + str(active))
-        elif active:
-            announce("Нейросеть выключена. Активный профиль: " + str(active))
-        else:
-            announce("Профили нейросети не настроены")
-        return True
     return False
 
 
@@ -553,7 +617,14 @@ def scenario_may_match(text):
     global _SCENARIO_MTIME, _SCENARIO_PHRASES
     try:
         mtime = os.path.getmtime(SCENARIO_PATH)
-        if mtime != _SCENARIO_MTIME:
+    except OSError:
+        # Нет файла — нет и сценариев. Иначе каждая фраза дергала бы CGI
+        # и глушила Алису (типичная чистая установка).
+        _SCENARIO_MTIME = None
+        _SCENARIO_PHRASES = []
+        return False
+    if mtime != _SCENARIO_MTIME:
+        try:
             with open(SCENARIO_PATH, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             items = data.get("scenarios") if isinstance(data, dict) else data
@@ -562,10 +633,11 @@ def scenario_may_match(text):
                 if isinstance(item, dict):
                     phrases.extend(str(p) for p in (item.get("phrases") or []) if p)
             _SCENARIO_PHRASES = phrases
-            _SCENARIO_MTIME = mtime
-    except Exception:
-        # Если файл недоступен/сломан — пусть решает CGI.
-        return True
+        except (OSError, ValueError, TypeError) as exc:
+            # Сломанный файл не должен превращать каждую фразу в CGI-запрос.
+            log("сценарии: файл не читается (%s)" % exc)
+            _SCENARIO_PHRASES = []
+        _SCENARIO_MTIME = mtime
     low = normalize(text)
     return bool(low) and any(
         normalize(phrase) and normalize(phrase) in low
@@ -734,8 +806,9 @@ def should_silence(text):
     if "радио" in low and any(word in low for word in ("включ", "выключ", "поставь", "играй")):
         return False
     # Чисто «алисова» фраза: ни команды пульта, ни сценария, ни LLM —
-    # её ответ глушить нельзя.
-    if alice_owns(text) and not match(text) and not llm_switch(text) \
+    # её ответ глушить нельзя. llm_switch здесь только проверяет сценарий
+    # (dry_run), иначе профиль включался бы дважды: до mute и в handle().
+    if alice_owns(text) and not match(text) and not llm_switch(text, dry_run=True) \
             and not scenario_may_match(text):
         return False
     return llm_enabled()
