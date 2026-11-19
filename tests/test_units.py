@@ -1012,6 +1012,79 @@ def test_llm_errors_and_models():
         llm.urllib.request.urlopen = original
 
 
+def test_llm_response_parsing():
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+            self.seen = None
+
+        def read(self, limit=None):
+            self.seen = limit
+            return self.payload[:limit] if limit else self.payload
+
+    def rejected(payload, limit=llm.MAX_RESPONSE):
+        try:
+            llm.read_json_response(Response(payload), limit)
+            return False
+        except ValueError:
+            return True
+
+    body = llm.read_json_response(
+        Response(b'{"choices":[{"message":{"content":"ok"}}]}'))
+    check("ответ: JSON читается",
+          body["choices"][0]["message"]["content"] == "ok", str(body))
+    check("ответ: текст из content", llm.chat_answer(body) == "ok")
+    check("ответ: пустой content",
+          llm.chat_answer({"choices": [{"message": {"content": None}}]}) == "")
+    check("ответ: reasoning как fallback",
+          llm.chat_answer({"choices": [{"message": {
+              "content": None, "reasoning": "думал"}}]}) == "думал")
+    check("ответ: массив частей",
+          llm.chat_answer({"choices": [{"message": {"content": [
+              {"type": "text", "text": "а"}, {"type": "text", "text": "б"}]}}]}) == "а б")
+    check("ответ: не chat/completions", llm.chat_answer({"data": []}) is None)
+    check("ответ: пустые choices", llm.chat_answer({"choices": []}) is None)
+    check("ответ: не-JSON -> ValueError", rejected(b"<html>"))
+    check("ответ: больше лимита -> ValueError", rejected(b"12345", 4))
+
+    response = Response(b"{}")
+    llm.read_json_response(response, 10)
+    check("ответ: читается не больше лимита", response.seen == 11, str(response.seen))
+
+
+def test_llm_ask_requires_model():
+    class Stop(Exception):
+        pass
+
+    captured = {}
+    old_config = llm.load_config
+    old_fail = llm.common.fail
+
+    def fail(status, message, **extra):
+        captured.update(status=status, message=message, extra=extra)
+        raise Stop()
+
+    llm.load_config = lambda: {
+        "profiles": [{"id": "p", "provider": "custom", "model": "",
+                      "base_url": "https://example.com/v1", "key": "k"}],
+        "active": "p",
+        "max_tokens": 260,
+    }
+    llm.common.fail = fail
+    try:
+        try:
+            llm.ask("привет")
+        except Stop:
+            pass
+        check("llm: без модели — 400",
+              captured.get("status") == 400
+              and "модель" in str(captured.get("message") or "").lower(),
+              str(captured))
+    finally:
+        llm.load_config = old_config
+        llm.common.fail = old_fail
+
+
 def test_llm_profile_id():
     config = {"profiles": [], "active": None}
     data = {
@@ -1029,6 +1102,19 @@ def test_llm_profile_id():
     check("профиль: повторный запуск не плодит дубли",
           len(config["profiles"]) == 1 and config["profiles"][0].get("id") == "aitunnel",
           str(config["profiles"]))
+    llm.save_profile(config, dict(data, profile_id="AITUNNEL",
+                                  name="Другое имя", model="m2"))
+    check("профиль: profile_id без учёта регистра",
+          len(config["profiles"]) == 1
+          and config["profiles"][0].get("model") == "m2",
+          str(config["profiles"]))
+
+    suffixed = {"profiles": [], "active": None}
+    for _ in range(3):
+        llm.save_profile(suffixed, {"name": "ChatGPT", "provider": "openai"})
+    ids = [item["id"] for item in suffixed["profiles"]]
+    check("профиль: суффиксы от корня имени",
+          ids == ["chatgpt", "chatgpt-2", "chatgpt-3"], str(ids))
 
 
 def main():
@@ -1055,6 +1141,8 @@ def main():
         test_update_fetch_release,
         test_llm_chat_names,
         test_llm_errors_and_models,
+        test_llm_response_parsing,
+        test_llm_ask_requires_model,
         test_llm_profile_id,
         test_voice_chat_commands,
         test_voice_chat_actions,
