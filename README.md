@@ -7,6 +7,9 @@
 [![Release](https://img.shields.io/github/v/release/RoBiN19666/midipult?style=flat-square&label=release)](https://github.com/RoBiN19666/midipult/releases)
 [![License](https://img.shields.io/github/license/RoBiN19666/midipult?style=flat-square&label=license)](https://github.com/RoBiN19666/midipult/blob/main/LICENSE)
 
+> **Форк.** Добавлены веб-поиск AITUNNEL и правки для работы LLM через агрегатор.
+> Подробности — [docs/AITUNNEL.md](docs/AITUNNEL.md).
+
 > **⚠️ ВАЖНО:**
 > **Проект не связан с Яндексом. Использование только на вашем собственном
 > устройстве. Вы делаете это на свой страх и риск. Автор не несёт
