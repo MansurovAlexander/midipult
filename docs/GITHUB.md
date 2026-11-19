@@ -80,7 +80,12 @@ python tests/run_cgi_tests.py
 
 Тест на переводах строк считает текстовыми `.html`, `.py`, `.conf`, `.sh`,
 `.md`, `.json`, `.ps1`, `.cmd`, `.yml` и `S99mypult`: CRLF допустим только в
-`.ps1`/`.cmd` (`.gitattributes`, `eol=crlf`), BOM — только в `.ps1`.
+`.ps1`/`.cmd` (`.gitattributes`, `eol=crlf`). BOM разрешён только в `.ps1` и
+обязателен там, где есть не-ASCII (иначе PowerShell 5.1 читает файл как ANSI
+и кириллица ломается); у `.ps1` дополнительно проверяются UTF-8 и отсутствие
+NUL. Именно на этом падал `deploy/push-to-station.ps1`, сохранённый в
+UTF-16LE: `.gitattributes` перекодировал переводы строк, но NUL-байты
+остались.
 
 ## Проверка перед публикацией
 
