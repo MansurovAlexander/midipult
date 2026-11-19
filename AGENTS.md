@@ -84,8 +84,8 @@ node --check /tmp/ui_check.js
 Тесты:
 
 ```sh
-python tests/test_units.py       # 192 проверки
-python tests/static_checks.py    # 121 проверка
+python tests/test_units.py       # 196 проверок
+python tests/static_checks.py    # 122 проверки
 python tests/run_cgi_tests.py    # 42 проверки
 ```
 
