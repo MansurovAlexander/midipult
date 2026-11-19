@@ -22,6 +22,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tarfile
 import time
 import urllib.parse
 import urllib.request
@@ -42,6 +43,9 @@ PIDFILE = os.path.join(VPN_DIR, "sing-box.pid")
 LOG = os.path.join(VPN_DIR, "sing-box.log")
 AUTOSTART = os.path.join(BASE, "vpn.autostart")
 VERSION = "1.10.7"
+PINNED_SHA256 = {
+    "1.10.7": "15b43a0a50b4e6962aca819d4f3055aaac75ca7481350d4aaebe93ed06b7af49",
+}
 TUN = "tun0"
 
 
@@ -298,22 +302,35 @@ def ensure_binary():
                 expected = fh.read(64).strip().split()[0].lower()
         except (OSError, IndexError):
             expected = ""
-    if expected:
-        digest = hashlib.sha256()
-        with open(archive, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                digest.update(chunk)
-        if digest.hexdigest() != expected:
-            raise RuntimeError("sing-box: SHA-256 не совпал")
+    if not expected:
+        expected = PINNED_SHA256.get(VERSION, "")
+    if not expected:
+        raise RuntimeError("sing-box: нет SHA-256 для версии %s" % VERSION)
+    digest = hashlib.sha256()
+    with open(archive, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != expected:
+        raise RuntimeError("sing-box: SHA-256 не совпал")
 
     extract = "/tmp/sing-box-extract"
     if os.path.isdir(extract):
         shutil.rmtree(extract, ignore_errors=True)
     os.makedirs(extract, exist_ok=True)
-    code, _, err = common.run(
-        ["/bin/sh", "-c", "gzip -dc %s | tar -xf - -C %s" % (archive, extract)], timeout=60)
-    if code != 0:
-        raise RuntimeError("не распаковался sing-box: %s" % err)
+    try:
+        with tarfile.open(archive, "r:gz") as tf:
+            members = tf.getmembers()
+            for member in members:
+                name = member.name.replace("\\", "/")
+                if name.startswith("/") or ".." in name.split("/"):
+                    raise ValueError("небезопасный путь: %s" % name)
+                if member.issym() or member.islnk():
+                    raise ValueError("ссылки в архиве запрещены")
+                if not (member.isfile() or member.isdir()):
+                    raise ValueError("неподдерживаемый элемент: %s" % name)
+            tf.extractall(extract, members=members, filter="data")
+    except (tarfile.TarError, OSError, ValueError) as exc:
+        raise RuntimeError("не распаковался sing-box: %s" % exc)
 
     found = None
     for root, _dirs, files in os.walk(extract):

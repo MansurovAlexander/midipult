@@ -463,6 +463,10 @@ def test_vpn_parsing():
     import base64
     import json
 
+    check("vpn: SHA-256 sing-box закреплён",
+          len(vpn.PINNED_SHA256.get(vpn.VERSION, "")) == 64,
+          vpn.VERSION)
+
     vless = vpn.parse_link(
         "vless://11111111-2222-3333-4444-555555555555@example.com:443"
         "?security=tls&type=ws&path=%2Fws&sni=example.com#Test")
