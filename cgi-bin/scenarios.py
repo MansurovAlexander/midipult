@@ -149,7 +149,8 @@ def run_action(action):
             raise RuntimeError("адрес запрещён: %s" % exc)
         request = urllib.request.Request(url, method="GET",
                                          headers={"User-Agent": "mypult-scenario"})
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with common.open_url(request, timeout=10, allow_http=True,
+                             allow_private=True, allow_loopback=False) as response:
             response.read(1024)
     else:
         raise RuntimeError("неизвестное действие: %s" % kind)

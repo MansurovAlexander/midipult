@@ -329,9 +329,21 @@ def test_auth_guard():
 
 
 def test_url_guard():
+    import urllib.request
+
     def bad(url, **kwargs):
         try:
             common.url_guard(url, **kwargs)
+            return False
+        except ValueError:
+            return True
+
+    def redirect_bad(target, **kwargs):
+        handler = common.GuardedRedirectHandler(
+            lambda url: common.url_guard(url, **kwargs))
+        request = urllib.request.Request("https://8.8.8.8/")
+        try:
+            handler.redirect_request(request, None, 302, "Found", {}, target)
             return False
         except ValueError:
             return True
@@ -352,6 +364,31 @@ def test_url_guard():
           bad("http://169.254.169.254", allow_http=True, allow_private=True,
               allow_loopback=True))
     check("ssrf: неверная схема запрещена", bad("ftp://8.8.8.8"))
+    check("ssrf: redirect в loopback запрещён",
+          redirect_bad("http://127.0.0.1/", allow_http=True,
+                       allow_private=True))
+    check("ssrf: redirect в метаданные запрещён",
+          redirect_bad("http://169.254.169.254/", allow_http=True,
+                       allow_private=True, allow_loopback=True))
+
+    handler = common.GuardedRedirectHandler(lambda url: url,
+                                            expected_host=("api.example.com", 443))
+    request = urllib.request.Request("https://api.example.com/v1")
+    try:
+        handler.redirect_request(request, None, 302, "Found", {},
+                                 "https://evil.example/")
+        same_host_rejected = False
+    except ValueError:
+        same_host_rejected = True
+    check("ssrf: redirect на другой хост запрещён", same_host_rejected)
+
+    try:
+        common.open_url(urllib.request.Request("https://8.8.8.8/"),
+                        guard=lambda url: url, allow_private=True)
+        mixed_rejected = False
+    except TypeError:
+        mixed_rejected = True
+    check("ssrf: guard не сочетается с allow_*", mixed_rejected)
 
 
 def test_update_assets():
@@ -364,6 +401,46 @@ def test_update_assets():
 
     check("update: http-архив запрещён", bad("http://github.com/x.tar.gz"))
     check("update: чужой хост запрещён", bad("https://evil.example/x.tar.gz"))
+
+    old_guard = update.common.url_guard
+    try:
+        update.common.url_guard = lambda url, **kwargs: url
+        check("update: api.github.com разрешён",
+              update.api_guard("https://api.github.com/repos/x/y/releases")
+              == "https://api.github.com/repos/x/y/releases")
+        check("update: release-assets разрешён",
+              update.asset_guard(
+                  "https://release-assets.githubusercontent.com/x.tar.gz")
+              == "https://release-assets.githubusercontent.com/x.tar.gz")
+    finally:
+        update.common.url_guard = old_guard
+
+    def api_bad(url):
+        try:
+            update.api_guard(url)
+            return False
+        except ValueError:
+            return True
+
+    check("update: api_guard не пускает github.com",
+          api_bad("https://github.com/x"))
+    check("update: api_guard не пускает http",
+          api_bad("http://api.github.com/x"))
+
+    old_env = os.environ.get("MYPULT_UPDATE_API")
+    os.environ["MYPULT_UPDATE_API"] = "https://api.example.com/releases"
+    old_guard = update.common.url_guard
+    try:
+        update.common.url_guard = lambda url, **kwargs: url
+        check("update: MYPULT_UPDATE_API разрешает свой хост",
+              update.api_guard("https://api.example.com/releases")
+              == "https://api.example.com/releases")
+    finally:
+        update.common.url_guard = old_guard
+        if old_env is None:
+            os.environ.pop("MYPULT_UPDATE_API", None)
+        else:
+            os.environ["MYPULT_UPDATE_API"] = old_env
 
 
 def test_state_player_fresh():
@@ -670,12 +747,12 @@ def test_update_fetch_release():
                          "midipult-0.4.52.tar.gz.sha256")
     body = json.dumps([android, draft, panel]).encode("utf-8")
 
-    old_urlopen = update.urllib.request.urlopen
+    old_open = common.open_url
     try:
-        update.urllib.request.urlopen = lambda request, timeout=None: FakeResponse(body)
+        common.open_url = lambda request, timeout=None, **kwargs: FakeResponse(body)
         fetched = update.fetch_release()
     finally:
-        update.urllib.request.urlopen = old_urlopen
+        common.open_url = old_open
 
     check("update: fetch_release пропускает Android и draft",
           fetched["tag"] == "v0.4.52" and fetched["version"] == "0.4.52", str(fetched))
@@ -972,44 +1049,44 @@ def test_llm_errors_and_models():
         def __exit__(self, *args):
             return False
 
-    original = llm.urllib.request.urlopen
+    original = common.open_url
 
-    def fake_public(request, timeout=20):
+    def fake_public(request, timeout=20, **kwargs):
         return FakeResponse(json_mod.dumps({"chat": {"model-a": {}, "model-b": {}}}).encode("utf-8"))
 
     try:
-        llm.urllib.request.urlopen = fake_public
+        common.open_url = fake_public
         models, source = llm.fetch_models({"provider": "aitunnel", "key": ""}, "aitunnel", "")
         check("модели: публичный каталог без ключа",
               source == "public" and models == ["model-a", "model-b"], str((source, models)))
     finally:
-        llm.urllib.request.urlopen = original
+        common.open_url = original
 
-    def fake_key(request, timeout=20):
+    def fake_key(request, timeout=20, **kwargs):
         return FakeResponse(json_mod.dumps({"data": [{"id": "m1"}, {"id": "m2"}]}).encode("utf-8"))
 
     try:
-        llm.urllib.request.urlopen = fake_key
+        common.open_url = fake_key
         models, source = llm.fetch_models(
             {"provider": "aitunnel", "key": "k", "base_url": "https://api.aitunnel.ru/v1"},
             "aitunnel", "")
         check("модели: по ключу", source == "key" and models == ["m1", "m2"],
               str((source, models)))
     finally:
-        llm.urllib.request.urlopen = original
+        common.open_url = original
 
-    def fake_fail(request, timeout=20):
+    def fake_fail(request, timeout=20, **kwargs):
         raise urllib.error.URLError("no net")
 
     try:
-        llm.urllib.request.urlopen = fake_fail
+        common.open_url = fake_fail
         models, source = llm.fetch_models({"provider": "openrouter", "key": ""},
                                           "openrouter", "")
         check("модели: встроенный fallback",
               source == "builtin" and models == llm.PROVIDERS["openrouter"]["models"],
               str((source, models)))
     finally:
-        llm.urllib.request.urlopen = original
+        common.open_url = original
 
 
 def test_llm_response_parsing():

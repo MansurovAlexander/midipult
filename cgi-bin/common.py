@@ -501,6 +501,46 @@ def url_guard(url, allow_http=False, allow_private=False, allow_loopback=False):
     return raw
 
 
+class GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Проверять каждый redirect тем же guard, что и исходный URL."""
+
+    def __init__(self, guard, expected_host=None):
+        super().__init__()
+        self.guard = guard
+        self.expected_host = expected_host
+
+    @staticmethod
+    def _host_port(url):
+        parsed = urllib.parse.urlsplit(str(url))
+        default = 443 if parsed.scheme == "https" else 80
+        return (parsed.hostname or "").lower(), parsed.port or default
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        checked = self.guard(newurl) or newurl
+        if self.expected_host and self._host_port(checked) != self.expected_host:
+            raise ValueError("redirect на другой хост запрещён")
+        return super().redirect_request(req, fp, code, msg, headers, checked)
+
+
+def open_url(request, timeout=30, guard=None, same_host=False, **guard_kwargs):
+    """urlopen с проверкой redirect-адресов.
+
+    guard(url) должен бросить ValueError для запрещённого адреса. По умолчанию
+    используется url_guard с переданными allow_http/allow_private/allow_loopback.
+    same_host=True запрещает redirect на другой хост (для запросов с ключом).
+    """
+    if guard is not None and guard_kwargs:
+        raise TypeError("guard не сочетается с allow_*")
+    check = guard or (lambda url: url_guard(url, **guard_kwargs))
+    expected_host = None
+    if same_host:
+        full = getattr(request, "full_url", None) or str(request)
+        expected_host = GuardedRedirectHandler._host_port(full)
+    opener = urllib.request.build_opener(
+        GuardedRedirectHandler(check, expected_host=expected_host))
+    return opener.open(request, timeout=timeout)
+
+
 # --------------------------------------------------------------------------- #
 #  Процессы
 # --------------------------------------------------------------------------- #

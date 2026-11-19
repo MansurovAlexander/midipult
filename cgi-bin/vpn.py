@@ -82,7 +82,8 @@ def mask_url(url):
 def fetch(url, timeout=20):
     url = common.url_guard(url, allow_http=False, allow_private=False, allow_loopback=False)
     request = urllib.request.Request(url, headers={"User-Agent": "mypult/1.0"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with common.open_url(request, timeout=timeout, allow_http=False,
+                         allow_private=False, allow_loopback=False) as response:
         raw = response.read(2_000_000)
     return raw.decode("utf-8", "replace")
 
@@ -281,6 +282,8 @@ def ensure_binary():
     url = common.url_guard(url, allow_http=False, allow_private=False,
                            allow_loopback=False)
     code, _, err = common.run(["/opt/bin/curl", "-L", "-f", "-s", "-m", "180",
+                               "--proto", "=https", "--proto-redir", "=https",
+                               "--max-redirs", "3",
                                "-o", archive, url], timeout=200)
     if code != 0 or not os.path.exists(archive):
         raise RuntimeError("не скачался sing-box: %s" % (err or code))
