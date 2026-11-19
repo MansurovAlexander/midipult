@@ -91,7 +91,18 @@
   `objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
   `codeload.github.com`) на каждом хопе; `sing-box` качается `curl` с
   `--proto =https`, `--proto-redir =https`, `--max-redirs 3`.
-- Тесты: 190 проверок `test_units`, 118 `static_checks` (одна известная про
+- Безопасность: `cgi-bin/vpn.py` больше не ставит `sing-box` без проверки
+  хэша. Для `1.10.7` SHA-256 закреплён в коде (`PINNED_SHA256`); ожидаемое
+  значение берётся по порядку `MYPULT_SINGBOX_SHA256` →
+  `/data/mypult/sing-box.sha256` → пин. Значение из переменной или файла
+  принимается только как 64 hex-символа (регистр не важен), иначе молча
+  используется пин; если пина для версии нет — установка отказывается
+  («sing-box: нет SHA-256 для версии …»). Несовпадение — «SHA-256 не совпал».
+- Безопасность: архив `sing-box` распаковывается через `tarfile` с
+  `filter="data"` вместо `sh -c "gzip -dc | tar -xf"`; запрещены абсолютные
+  пути, `..` в компонентах, symlink/hardlink и элементы, кроме обычных файлов
+  и каталогов. Shell в этом шаге больше не участвует.
+- Тесты: 191 проверка `test_units`, 119 `static_checks` (одна известная про
   CRLF), 42 `run_cgi`.
 
 ## 0.4.68 — 2026-11-10
