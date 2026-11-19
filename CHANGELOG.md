@@ -36,8 +36,9 @@
 - Подсказки: при отсутствии `websocket-client` ответы `common.py`, `media.py`
   и `volume.py` советуют `python3 -m pip install websocket-client` вместо
   несуществующей команды `yse install python3-websocket-client`; `alsa-utils`
-  ставится через `opkg install alsa-utils` (команды `yse` на колонке нет).
-  Тест `run_cgi` проверяет, что в `hint` есть `pip install websocket-client`.
+  ставится через `/opt/bin/opkg install alsa-utils` (команды `yse` на колонке
+  нет). Тест `run_cgi` при отсутствии модуля проверяет, что в `hint` есть
+  `pip install websocket-client`.
 - Обновление: `cgi-bin/update.py` по умолчанию смотрит в форк
   `MansurovAlexander/midipult`; переопределение — `MYPULT_UPDATE_REPO`
   (URL API — `MYPULT_UPDATE_API`). Пока в форке нет релизов панели, панель
