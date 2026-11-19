@@ -229,7 +229,7 @@ def test_media():
 
     status, data, _, _ = run_cgi("media.py", json.dumps({"action": "play"}).encode())
     check("media: 501 без websocket-client", status == 501, "status=%s" % status)
-    check("media: hint про yse", "python3-websocket-client" in str(data.get("hint", "")), str(data))
+    check("media: hint про pip", "pip install websocket-client" in str(data.get("hint", "")), str(data))
 
     status, data, _, _ = run_cgi("media.py", query="action=list")
     check("media: 501 и на list", status == 501, str(data))
