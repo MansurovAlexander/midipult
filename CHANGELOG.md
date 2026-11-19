@@ -79,7 +79,19 @@
   `tempfile.mkstemp` в той же папке, `fsync` и `os.replace`, tmp удаляется при
   ошибке; предсказуемого `<файл>.tmp` больше нет, параллельные записи не
   перемешиваются.
-- Тесты: 181 проверка `test_units`, 118 `static_checks` (одна известная про
+- Безопасность: `common.url_guard()` применяется и к redirect-хопам —
+  `common.open_url()` обёртывает `urlopen` в `GuardedRedirectHandler` и
+  прогоняет через guard каждый 301/302/303/307/308, поэтому публичный URL не
+  может перенаправить подписку VPN или HTTP-сценарий в loopback, LAN или
+  метаданные, а обычный публичный redirect работает. LLM (`ask`,
+  `fetch_models`) ходит с `same_host=True`: `Authorization` не уходит на
+  другой хост или порт, в `ask` это `502` «Неожиданный ответ API».
+  `update.py` проверяет `api_guard` (`api.github.com`; `MYPULT_UPDATE_API` —
+  только публичный https) и `asset_guard` (`github.com`,
+  `objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
+  `codeload.github.com`) на каждом хопе; `sing-box` качается `curl` с
+  `--proto =https`, `--proto-redir =https`, `--max-redirs 3`.
+- Тесты: 190 проверок `test_units`, 118 `static_checks` (одна известная про
   CRLF), 42 `run_cgi`.
 
 ## 0.4.68 — 2026-11-10

@@ -380,8 +380,9 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 - `tests/static_checks.py` — 118 проверок: структура HTML, дубликаты id,
   версия/CHANGELOG, кодировка и переводы строк (одна проверка про CRLF
   известна и не блокирует), кеш моделей в UI «Нейросеть»;
-- `tests/test_units.py` — 181 проверка чистой логики, в том числе запись JSON:
-  временный файл не остаётся, параллельная запись не ломает файл;
+- `tests/test_units.py` — 190 проверок чистой логики, в том числе
+  `url_guard` и redirect-хопы, запись JSON: временный файл не остаётся,
+  параллельная запись не ломает файл;
 - `tests/run_cgi_tests.py` — 42 проверки CGI на стенде.
 
 Запуск:
@@ -407,6 +408,24 @@ CGI запускаются от root: иначе недоступны sysfs, `am
   инвалидирует старые сессии; «Заблокировать» сбрасывает текущую.
 - HTTPS не используется: самоподписанный сертификат даёт предупреждение,
   Let's Encrypt требует публичный домен.
+- Исходящие запросы: `common.url_guard()` проверяет схему, отсутствие
+  `user:pass` в URL, резолвит хост и отклоняет link-local/метаданные,
+  `0.0.0.0` и multicast (всегда), loopback и приватные сети (если они не
+  разрешены флагом или allowlist `/data/mypult/url_allow.json`).
+  `common.open_url()` — обёртка над `urlopen` с `GuardedRedirectHandler`:
+  каждый redirect (301/302/303/307/308) проверяется тем же guard, а
+  `same_host=True` дополнительно запрещает смену хоста и порта. Guard смотрит
+  DNS-ответ в момент запроса; окно для DNS-rebinding между проверкой и
+  соединением остаётся, модель угроз — доверенная LAN.
+- Режимы проверки: HTTP-действия сценариев — `http(s)` и приватная LAN,
+  loopback только через allowlist; VPN-подписка — публичный `https`; LLM
+  `ask`/`fetch_models` — `same_host` (ключ не уходит на чужой хост, в `ask`
+  это `502` «Неожиданный ответ API»); `update.py` — `api_guard`
+  (`api.github.com` и хост `MYPULT_UPDATE_API` при условии публичного
+  `https`) для списка релизов и `asset_guard` (`github.com`,
+  `objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
+  `codeload.github.com`) для SHA и архива, на каждом хопе. `sing-box`
+  качается `curl` с `--proto =https --proto-redir =https --max-redirs 3`.
 - Секреты — `600`, JSON пишется атомарно (уникальный tmp в той же папке,
   `fsync`, `os.replace`); бэкап содержит ключи, хранить отдельно.
 - Остановка процессов по pid-файлу сверяет `/proc/<pid>/cmdline`; при
@@ -431,6 +450,8 @@ CGI запускаются от root: иначе недоступны sysfs, `am
   `midipult-<версия>.tar.gz` и `.sha256`. `MYPULT_UPDATE_REPO` и
   `MYPULT_UPDATE_API` — dev-переопределения; с устройства окружение lighttpd
   не пробрасывается, их нужно задавать в init-скрипте/окружении запуска.
+  Хост из `MYPULT_UPDATE_API` тоже обязан быть публичным `https`: loopback и
+  приватные адреса отклоняются, redirect проверяется на каждом хопе.
 - **FastCGI** в сборке отсутствует (`mod_fastcgi`/`flup`); горячий `/state`
   обслуживает отдельный локальный демон.
 
