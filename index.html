@@ -3172,7 +3172,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   }
 
   var modelsCache = {};
-  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|^tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft|audio|realtime)/i;
+  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|(^|\/)tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft|audio|realtime)/i;
 
   function fillModelOptions(models, selected) {
     el.llmModel.innerHTML = '';
@@ -3202,20 +3202,38 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     toggleCustomModel();
   }
 
+  function serverProfile() {
+    return findProfile(State.llm && State.llm.serverActive);
+  }
+
+  function modelsCacheKey(provider, base) {
+    if (!provider) return '';
+    var server = serverProfile();
+    var mark = 'no-key';
+    if (server && server.key_set && provider.id === server.provider
+        && (!base || base === (server.base_url || ''))) {
+      mark = 'key';
+    }
+    return provider.id + '|' + base + '|' + mark;
+  }
+
   function loadModels(selected) {
     var provider = currentProvider();
     if (!provider) return;
     var base = (el.llmBase.value || '').trim();
-    var active = findProfile(State.llm.active);
-    // Ключ меняет источник каталога: без него — встроенный список,
-    // с ним — /models провайдера. Кеш должен это учитывать.
-    var cacheKey = provider.id + '|' + base + '|' + (active && active.key_set ? 'key' : 'no-key');
+    var cacheKey = modelsCacheKey(provider, base);
     if (modelsCache[cacheKey]) {
       fillModelOptions(modelsCache[cacheKey], selected);
       return;
     }
     cgi('llm.py', { models: 1, provider: provider.id, base_url: base },
       { timeout: 45000 }).then(function (data) {
+      // Пока ждали каталог (до 45 с), провайдер/base могли сменить.
+      // Иначе ответ старого запроса перерисует селект чужими моделями.
+      if (cacheKey !== modelsCacheKey(currentProvider(),
+                                      (el.llmBase.value || '').trim())) {
+        return;
+      }
       var models = (data && data.models) || [];
       // В каталоге кроме чат-моделей есть embeddings, TTS, картинки и видео.
       var chatOnly = models.filter(function (id) { return !MODEL_BLOCK.test(id); });
@@ -3285,15 +3303,22 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
 
   var lastActiveProfile = null;
   var lastKeySet = null;
+  var lastServerKey = null;
 
   function applyProfile(profile) {
     if (!State.llm) return;
     var activeId = profile ? profile.id : null;
     var keySet = profile ? !!profile.key_set : false;
-    if (activeId !== lastActiveProfile || keySet !== lastKeySet) {
+    var server = serverProfile();
+    var serverKey = server
+      ? [server.id, server.provider, server.base_url || '', !!server.key_set].join('|')
+      : '';
+    if (activeId !== lastActiveProfile || keySet !== lastKeySet
+        || serverKey !== lastServerKey) {
       modelsCache = {};
       lastActiveProfile = activeId;
       lastKeySet = keySet;
+      lastServerKey = serverKey;
     }
     State.llm.active = activeId;
     if (profile) {
@@ -3332,6 +3357,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       providers: data.providers || [],
       profiles: data.profiles || [],
       active: data.active || null,
+      serverActive: data.active || null,
       enabled: !!(data.voice_enabled !== undefined ? data.voice_enabled : data.enabled),
       provider: 'openai',
       chats: data.chats || [],
@@ -3465,6 +3491,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     return withBusy(el.btnLlmSave, function () {
       return cgi('llm.py', payload, { timeout: 15000 }).then(function (data) {
         el.llmKey.value = '';
+        modelsCache = {};
         applyLlmInfo(data);
         toast('Профиль сохранён: ' + name, 'ok');
       }).catch(function (err) {

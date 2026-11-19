@@ -465,8 +465,13 @@ def test_llm_ui_cache():
     check("LLM UI: fillModels не затирает base_url профиля",
           "!el.llmBase.value.trim()" in html)
     check("LLM UI: кеш моделей учитывает key_set",
-          "lastKeySet" in html
-          and "active && active.key_set ? 'key' : 'no-key'" in html)
+          "function modelsCacheKey" in html
+          and "server.key_set" in html
+          and "serverActive" in html)
+    check("LLM UI: ответ старого запроса игнорируется",
+          "cacheKey !== modelsCacheKey(currentProvider()" in html)
+    check("LLM UI: сохранение сбрасывает кеш моделей",
+          "modelsCache = {};\n        applyLlmInfo(data)" in html)
     check("LLM UI: смена base_url перезагружает модели",
           "el.llmBase.addEventListener('change'" in html)
     check("LLM UI: audio/realtime отфильтрованы",
