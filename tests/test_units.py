@@ -1259,6 +1259,34 @@ def test_llm_chat_history_public():
           full["history"][0]["content"] == "привет", str(full))
 
 
+def test_llm_info_active_history():
+    old_config = llm.load_config
+    old_chats = llm.load_chats
+    try:
+        llm.load_config = lambda: {
+            "profiles": [], "active": None, "system_prompt": "",
+            "max_tokens": 260, "error_messages": {},
+        }
+        llm.load_chats = lambda: {
+            "active": "c1",
+            "chats": [
+                {"id": "c1", "name": "A", "messages": [
+                    {"role": "user", "content": "q"},
+                    {"role": "assistant", "content": "a"}]},
+                {"id": "c2", "name": "B", "messages": [
+                    {"role": "user", "content": "x"}]},
+            ],
+        }
+        data = llm.info()
+        first, second = data["chats"]
+        check("info: история только у активной сессии",
+              len(first.get("history") or []) == 2 and "history" not in second,
+              str(data["chats"]))
+    finally:
+        llm.load_config = old_config
+        llm.load_chats = old_chats
+
+
 def main():
     for test in (
         test_generic_helpers,
@@ -1284,6 +1312,7 @@ def main():
         test_update_fetch_release,
         test_llm_chat_names,
         test_llm_chat_history_public,
+        test_llm_info_active_history,
         test_llm_errors_and_models,
         test_llm_response_parsing,
         test_llm_ask_requires_model,

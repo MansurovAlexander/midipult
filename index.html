@@ -1119,7 +1119,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       </div>
     </div>
 
-    <div class="chat-sessions" id="llmSessions" role="list" aria-label="Сессии нейросети"></div>
+    <div class="chat-sessions" id="llmSessions" role="group" aria-label="Сессии нейросети"></div>
 
     <div class="row" style="margin-top:8px">
       <label class="llm-field" style="flex:1"><span>Длина ответа</span>
@@ -1175,7 +1175,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       <span class="seg-note" id="llmErrorsStatus">Сообщения провайдера</span>
       <button class="btn sm ghost" id="btnLlmErrors">Сохранить сообщения</button>
     </div>
-    <div class="chat-history" id="llmHistory" aria-live="polite">
+    <div class="chat-history" id="llmHistory">
       <div class="seg-note">История чата появится здесь.</div>
     </div>
     <div class="field" style="margin-top:12px">
@@ -3445,7 +3445,9 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       el.llmChat.title = chatName;
     }
     if (el.llmSystem) {
-      el.llmSystem.value = data.system_prompt || '';
+      if (el.llmSystem.dataset.dirty !== '1') {
+        el.llmSystem.value = data.system_prompt || '';
+      }
       el.llmSystemStatus.textContent = data.system_prompt ? 'Свой промпт' : 'Стандартный промпт';
     }
     if (el.llmErrors) {
@@ -3462,9 +3464,26 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     refreshDropdowns();
   }
 
+  function applyChatInfo(data) {
+    if (!State.llm) return;
+    State.llm.chats = (data && data.chats) || [];
+    State.llm.activeChat = (data && data.active_chat) || null;
+    if (el.llmChat) {
+      var name = (data && data.active_chat_name) || 'Чат 1';
+      el.llmChat.textContent = name;
+      el.llmChat.title = name;
+    }
+    renderLlmChats();
+  }
+
+  function refreshChats() {
+    return cgi('llm.py', { info: 1 }, { timeout: 8000, silent: true })
+      .then(applyChatInfo);
+  }
+
   function switchChat(payload) {
     return cgi('llm.py', payload, { timeout: 15000 }).then(function (data) {
-      applyLlmInfo(data);
+      applyChatInfo(data);
       toast('Чат: ' + (data.active_chat_name || '—'), 'ok');
     }).catch(function (err) {
       toast('Чат: ' + err.message, 'bad');
@@ -3491,7 +3510,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     var name = (el.chatRenameInput.value || '').trim();
     if (!name) { el.chatRenameInput.focus(); return; }
     return cgi('llm.py', { chat_rename: active, chat_name: name }, { timeout: 10000 }).then(function (data) {
-      applyLlmInfo(data);
+      applyChatInfo(data);
       closeChatRename();
       toast('Чат переименован: ' + (data.active_chat_name || name), 'ok');
     }).catch(function (err) {
@@ -3510,6 +3529,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   function saveLlmSystem() {
     var value = el.llmSystem.value.trim();
     return cgi('llm.py', { system_prompt: value }, { timeout: 15000 }).then(function (data) {
+      if (el.llmSystem) delete el.llmSystem.dataset.dirty;
       applyLlmInfo(data);
       toast(value ? 'Промпт сохранён' : 'Вернул стандартный промпт', 'ok');
     }).catch(function (err) {
@@ -3585,7 +3605,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
         var tokens = data.usage && data.usage.total_tokens
           ? ' · ' + data.usage.total_tokens + ' токенов' : '';
         el.llmMeta.textContent = [data.provider, data.model].filter(Boolean).join(' · ') + tokens;
-        return loadLlm();
+        return refreshChats().catch(function () {
+          el.llmAnswer.textContent = State.llmAnswer ||
+            '(ответ получен, но история не загрузилась)';
+          el.llmAnswer.classList.remove('empty');
+        });
       }).catch(function (err) {
         el.llmAnswer.textContent = 'Ошибка: ' + err.message;
         el.llmAnswer.classList.remove('empty');
@@ -6096,6 +6120,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     if (el.llmErrors) {
       el.llmErrors.addEventListener('input', function () {
         el.llmErrors.dataset.dirty = '1';
+      });
+    }
+    if (el.llmSystem) {
+      el.llmSystem.addEventListener('input', function () {
+        el.llmSystem.dataset.dirty = '1';
       });
     }
     el.btnLlmAsk.addEventListener('click', askLlm);

@@ -493,20 +493,26 @@ def active_chat(data):
 
 
 def chat_public(chat, with_history=False):
+    messages = chat.get("messages")
+    if not isinstance(messages, list):
+        messages = []
     result = {
         "id": chat.get("id"),
-        "name": chat.get("name"),
-        "messages": len(chat.get("messages") or []),
+        "name": chat.get("name") or "",
+        "messages": len(messages),
     }
     if with_history:
         history = []
-        for message in (chat.get("messages") or [])[-20:]:
+        for message in messages[-20:]:
             if not isinstance(message, dict):
                 continue
             role = message.get("role")
             content = message.get("content")
             if role in ("user", "assistant") and isinstance(content, str) and content.strip():
-                history.append({"role": role, "content": content[:4000]})
+                text = content[:4000]
+                if len(content) > 4000:
+                    text += "…"
+                history.append({"role": role, "content": text})
         result["history"] = history
     return result
 
