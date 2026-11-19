@@ -28,11 +28,47 @@ CONFIG_DIR = "/data/mypult"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "llm.json")
 CHATS_PATH = os.path.join(CONFIG_DIR, "chats.json")
 
+# Общие тексты ошибок: используются, если у провайдера нет своего варианта.
+BASE_ERRORS = {
+    "codes": {
+        400: "Нейросеть отклонила запрос",
+        401: "Ключ API не принят",
+        402: "Закончились средства на балансе нейросети",
+        403: "Доступ к нейросети запрещён",
+        404: "Модель не найдена",
+        408: "Сервис не ответил вовремя",
+        413: "Слишком большой запрос",
+        429: "Слишком много запросов подряд",
+        500: "Ошибка на стороне сервиса",
+        502: "Сервис нейросети недоступен",
+        503: "Сервис нейросети перегружен",
+        504: "Сервис не ответил вовремя",
+    },
+    "default": "Сервис нейросети не отвечает",
+}
+
 PROVIDERS = {
     "openai": {
         "title": "OpenAI",
         "base_url": "https://api.openai.com/v1",
         "models": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
+        "errors": {
+            "types": {
+                "invalid_api_key": "Ключ OpenAI не принят",
+                "insufficient_quota": "Закончилась квота OpenAI",
+                "rate_limit_exceeded": "Слишком много запросов к OpenAI",
+                "model_not_found": "Модель OpenAI не найдена",
+                "context_length_exceeded": "Слишком длинный запрос для модели",
+                "server_error": "Ошибка на стороне OpenAI",
+            },
+            "codes": {
+                401: "Ключ OpenAI не принят",
+                402: "Закончились средства на балансе OpenAI",
+                429: "Слишком много запросов к OpenAI",
+                500: "Ошибка на стороне OpenAI",
+            },
+            "default": "OpenAI не отвечает",
+        },
     },
     "openrouter": {
         "title": "OpenRouter",
@@ -43,18 +79,191 @@ PROVIDERS = {
             "google/gemini-2.0-flash-001",
             "deepseek/deepseek-chat",
         ],
+        "errors": {
+            "types": {
+                "invalid_api_key": "Ключ OpenRouter не принят",
+                "insufficient_credits": "Закончились кредиты OpenRouter",
+                "rate_limit_exceeded": "Слишком много запросов к OpenRouter",
+                "model_not_found": "Модель OpenRouter не найдена",
+                "no_endpoints_found": "У модели нет доступных провайдеров",
+                "context_length_exceeded": "Слишком длинный запрос для модели",
+            },
+            "codes": {
+                401: "Ключ OpenRouter не принят",
+                402: "Закончились кредиты OpenRouter",
+                404: "Модель OpenRouter не найдена",
+                429: "Слишком много запросов к OpenRouter",
+            },
+            "default": "OpenRouter не отвечает",
+        },
     },
     "deepseek": {
         "title": "DeepSeek",
         "base_url": "https://api.deepseek.com",
         "models": ["deepseek-flash", "deepseek-v4-pro"],
+        "errors": {
+            "types": {
+                "authentication_fails": "Ключ DeepSeek не принят",
+                "insufficient_balance": "Закончились средства на балансе DeepSeek",
+                "rate_limit_reached": "Слишком много запросов к DeepSeek",
+                "invalid_request_error": "DeepSeek отклонил запрос",
+                "server_error": "Ошибка на стороне DeepSeek",
+            },
+            "codes": {
+                401: "Ключ DeepSeek не принят",
+                402: "Закончились средства на балансе DeepSeek",
+                429: "Слишком много запросов к DeepSeek",
+                500: "Ошибка на стороне DeepSeek",
+            },
+            "default": "DeepSeek не отвечает",
+        },
+    },
+    "aitunnel": {
+        "title": "AITUNNEL",
+        "base_url": "https://api.aitunnel.ru/v1",
+        "models": ["deepseek-v4.1-flash-1017", "deepseek-v4.1-flash", "sonar"],
+        "errors": {
+            "types": {
+                "insufficient_balance": "Закончились деньги на балансе AITUNNEL",
+                "budget_exceeded": "Исчерпан бюджет ключа AITUNNEL",
+                "authentication_failed": "Ключ AITUNNEL не принят",
+                "permission_denied": "Ключу AITUNNEL запрещён этот запрос",
+                "model_not_found": "Модель не найдена в AITUNNEL",
+                "not_found": "AITUNNEL не нашёл запрошенный ресурс",
+                "invalid_request": "AITUNNEL отклонил запрос",
+                "sensitive_data_blocked": "Запрос заблокирован из-за чувствительных данных",
+                "rate_limited": "Слишком много запросов к AITUNNEL",
+                "provider_error": "Провайдер модели вернул ошибку",
+                "provider_unavailable": "Модель сейчас недоступна",
+                "upstream_invalid_response": "Провайдер вернул негодный ответ",
+                "service_unavailable": "Сервис AITUNNEL временно недоступен",
+                "internal": "Внутренняя ошибка AITUNNEL",
+            },
+            "codes": {
+                402: "Закончились деньги на балансе AITUNNEL",
+                403: "AITUNNEL запретил запрос",
+                429: "Слишком много запросов к AITUNNEL",
+                503: "AITUNNEL временно недоступен",
+            },
+            "default": "AITUNNEL не отвечает",
+        },
     },
     "custom": {
         "title": "Свой сервер (OpenAI-совместимый)",
         "base_url": "",
         "models": [],
+        "errors": {
+            "default": "Сервис нейросети не отвечает",
+        },
     },
 }
+
+
+def provider_errors(provider):
+    """Слить общие тексты ошибок с настройками конкретного провайдера."""
+    merged = {
+        "types": {},
+        "codes": dict(BASE_ERRORS["codes"]),
+        "default": BASE_ERRORS["default"],
+    }
+    cfg = (PROVIDERS.get(provider or "") or {}).get("errors") or {}
+    merged["types"].update(cfg.get("types") or {})
+    merged["codes"].update(cfg.get("codes") or {})
+    if cfg.get("default"):
+        merged["default"] = cfg["default"]
+    return merged
+
+
+def parse_error_lines(text):
+    """Разобрать строки «ключ=текст» (комментарии с # игнорируются)."""
+    result = {}
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if key and value:
+            result[key] = value
+    return result
+
+
+def default_error_lines(provider):
+    """Тексты провайдера в том же формате, что и пользовательские."""
+    errs = provider_errors(provider)
+    lines = ["# Типы ошибок провайдера"]
+    for key in sorted(errs["types"]):
+        lines.append("%s=%s" % (key, errs["types"][key]))
+    lines.append("# HTTP-коды")
+    for code in sorted(errs["codes"]):
+        lines.append("%s=%s" % (code, errs["codes"][code]))
+    lines.append("default=%s" % errs["default"])
+    return "\n".join(lines)
+
+
+def custom_error_messages(config, provider):
+    """Свои тексты для провайдера; старый общий вариант — как fallback."""
+    config = config or {}
+    messages = config.get("error_messages")
+    if isinstance(messages, dict):
+        text = messages.get(provider or "")
+        if isinstance(text, str) and text.strip():
+            return parse_error_lines(text)
+    legacy = config.get("error_messages_text")
+    if isinstance(legacy, str) and legacy.strip():
+        return parse_error_lines(legacy)
+    return {}
+
+
+def error_text(config, profile, code, etype="", ecode=""):
+    """Текст ошибки: свои правки, затем провайдер, затем общий вариант."""
+    provider = (profile or {}).get("provider") or ""
+    custom = custom_error_messages(config, provider)
+    for key in (etype, str(ecode or ""), str(code), "default"):
+        if key and key in custom:
+            return custom[key]
+    errs = provider_errors(provider)
+    for key in (etype, str(ecode or "")):
+        if key and key in errs["types"]:
+            return errs["types"][key]
+    return errs["codes"].get(code) or errs["default"]
+
+
+def fetch_models(profile):
+    """Модели: по ключу, иначе публичный каталог, иначе встроенный список."""
+    provider = (profile or {}).get("provider") or "openai"
+    base_url = ((profile or {}).get("base_url")
+                or PROVIDERS.get(provider, {}).get("base_url") or "").rstrip("/")
+    key = (profile or {}).get("key") or ""
+
+    if base_url and key:
+        try:
+            request = urllib.request.Request(
+                base_url + "/models",
+                headers={"Authorization": "Bearer " + key,
+                         "User-Agent": "MidiPult/0.4.68"})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                data = json.loads(response.read().decode("utf-8", "replace"))
+            ids = sorted({str(item.get("id")) for item in (data.get("data") or [])
+                          if isinstance(item, dict) and item.get("id")})
+            if ids:
+                return ids, "key"
+        except Exception:  # noqa: BLE001
+            pass
+
+    if provider == "aitunnel" or "aitunnel" in base_url:
+        try:
+            with urllib.request.urlopen(
+                    "https://api.aitunnel.ru/public/aitunnel/models",
+                    timeout=20) as response:
+                data = json.loads(response.read().decode("utf-8", "replace"))
+            chat = data.get("chat") if isinstance(data, dict) else None
+            if isinstance(chat, dict) and chat:
+                return sorted(chat.keys()), "public"
+        except Exception:  # noqa: BLE001
+            pass
+
+    return list(PROVIDERS.get(provider, {}).get("models") or []), "builtin"
 
 
 def slug(text):
@@ -95,6 +304,10 @@ def load_config():
         data["max_tokens"] = 260
     if not isinstance(data.get("system_prompt"), str):
         data["system_prompt"] = ""
+    if not isinstance(data.get("error_messages"), dict):
+        data["error_messages"] = {}
+    if not isinstance(data.get("error_messages_text"), str):
+        data["error_messages_text"] = ""
     return data
 
 
@@ -135,6 +348,13 @@ def info(config=None):
     active = active_profile(config)
     chats = load_chats()
     chat = active_chat(chats)
+    provider = (active or {}).get("provider") or "openai"
+    stored = ""
+    messages = config.get("error_messages")
+    if isinstance(messages, dict):
+        stored = str(messages.get(provider) or "")
+    if not stored:
+        stored = str(config.get("error_messages_text") or "")
     return {
         "ok": True,
         "providers": [
@@ -148,6 +368,8 @@ def info(config=None):
         # Совместимость со старым API: enabled теперь означает голосовой тумблер.
         "enabled": voice_enabled(config),
         "system_prompt": str(config.get("system_prompt") or ""),
+        "error_messages_text": stored or default_error_lines(provider),
+        "error_messages_custom": bool(stored),
         "config": public_profile(active),
         "max_tokens": int(config.get("max_tokens") or 260),
         "chats": [chat_public(item) for item in chats.get("chats") or []],
@@ -265,15 +487,34 @@ def ask(prompt, system=None):
         with urllib.request.urlopen(request, timeout=90) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = ""
+        raw = ""
         try:
-            detail = exc.read(600).decode("utf-8", "replace")
+            raw = exc.read(2000).decode("utf-8", "replace")
         except OSError:
             pass
-        common.fail(502, "API ответил HTTP %s" % exc.code, detail=detail[:400])
+        hint = ""
+        etype = ""
+        ecode = ""
+        try:
+            data = json.loads(raw) if raw.strip() else {}
+            err = data.get("error") if isinstance(data, dict) else None
+            if isinstance(err, dict):
+                etype = str(err.get("type") or "")
+                ecode = str(err.get("code") or "")
+                message = str(err.get("message") or "").strip()
+                if message:
+                    hint = message
+        except (ValueError, TypeError):
+            pass
+        short = error_text(config, profile, exc.code, etype, ecode)
+        common.fail(exc.code if 400 <= exc.code < 600 else 502, short,
+                    hint=hint[:300], detail=raw[:400], error_type=etype or None)
         return
     except (urllib.error.URLError, OSError) as exc:
-        common.fail(502, "Нет связи с API: %s" % exc)
+        common.fail(502, "Нет связи с сервисом нейросети",
+                    hint="Проверь интернет на колонке; если провайдер блокирует "
+                         "сеть, попробуй base_url https://ru-api.aitunnel.ru/v1",
+                    detail=str(exc)[:200])
         return
 
     try:
@@ -439,7 +680,8 @@ def chat_switch(data):
 def main():
     data = common.params()
     action_keys = ("prompt", "enabled", "voice_enabled", "activate", "delete", "provider", "name", "profile_id",
-                   "max_tokens", "system_prompt", "chat_next", "chat_prev", "chat_new", "chat_select",
+                   "max_tokens", "system_prompt", "error_messages_text", "models",
+                   "chat_next", "chat_prev", "chat_new", "chat_select",
                    "chat_delete", "chat_rename")
     if common.truthy(data.get("info")) or not any(key in data for key in action_keys):
         common.respond(200, info())
@@ -459,6 +701,30 @@ def main():
             common.fail(413, "Промпт длиннее 4000 символов")
             return
         config["system_prompt"] = prompt
+        save_config(config)
+        common.respond(200, info(config))
+        return
+
+    if data.get("models") is not None:
+        profile = active_profile(config)
+        models, source = fetch_models(profile)
+        common.respond(200, {"ok": True, "models": models, "source": source})
+        return
+
+    if data.get("error_messages_text") is not None:
+        messages = str(data.get("error_messages_text") or "")
+        if len(messages) > 4000:
+            common.fail(413, "Слишком длинный список сообщений об ошибках")
+            return
+        profile = active_profile(config)
+        provider = (profile or {}).get("provider") or "openai"
+        if not isinstance(config.get("error_messages"), dict):
+            config["error_messages"] = {}
+        if messages.strip():
+            config["error_messages"][provider] = messages
+        else:
+            config["error_messages"].pop(provider, None)
+        config.pop("error_messages_text", None)
         save_config(config)
         common.respond(200, info(config))
         return
