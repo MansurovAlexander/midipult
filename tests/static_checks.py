@@ -455,6 +455,24 @@ def test_p2_hardening():
           "if (document.hidden || busy) return;" in html)
 
 
+def test_llm_ui_cache():
+    html = read(os.path.join(ROOT, "index.html"))
+    base_pos = html.find("el.llmBase.value = profile.base_url")
+    models_pos = html.find("fillModels(profile.model")
+    check("LLM UI: base_url задаётся до загрузки моделей",
+          base_pos >= 0 and models_pos >= 0 and base_pos < models_pos,
+          "%s/%s" % (base_pos, models_pos))
+    check("LLM UI: fillModels не затирает base_url профиля",
+          "!el.llmBase.value.trim()" in html)
+    check("LLM UI: кеш моделей учитывает key_set",
+          "lastKeySet" in html
+          and "active && active.key_set ? 'key' : 'no-key'" in html)
+    check("LLM UI: смена base_url перезагружает модели",
+          "el.llmBase.addEventListener('change'" in html)
+    check("LLM UI: audio/realtime отфильтрованы",
+          "audio|realtime" in html and "MODEL_BLOCK" in html)
+
+
 def main():
     for test in (
         test_encoding,
@@ -474,6 +492,7 @@ def main():
         test_init_script,
         test_python_headers,
         test_version,
+        test_llm_ui_cache,
     ):
         try:
             test()

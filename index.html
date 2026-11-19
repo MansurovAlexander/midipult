@@ -3172,7 +3172,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   }
 
   var modelsCache = {};
-  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|^tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft)/i;
+  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|^tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft|audio|realtime)/i;
 
   function fillModelOptions(models, selected) {
     el.llmModel.innerHTML = '';
@@ -3206,7 +3206,10 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     var provider = currentProvider();
     if (!provider) return;
     var base = (el.llmBase.value || '').trim();
-    var cacheKey = provider.id + '|' + base;
+    var active = findProfile(State.llm.active);
+    // Ключ меняет источник каталога: без него — встроенный список,
+    // с ним — /models провайдера. Кеш должен это учитывать.
+    var cacheKey = provider.id + '|' + base + '|' + (active && active.key_set ? 'key' : 'no-key');
     if (modelsCache[cacheKey]) {
       fillModelOptions(modelsCache[cacheKey], selected);
       return;
@@ -3228,13 +3231,19 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   function fillModels(selected) {
     var provider = currentProvider();
     fillModelOptions(provider ? provider.models : [], selected);
-    if (provider && provider.base_url) el.llmBase.value = provider.base_url;
+    // Не затирать base_url профиля дефолтом провайдера: applyProfile
+    // выставляет base раньше, а selectProvider — явно.
+    if (provider && provider.base_url && !el.llmBase.value.trim()) {
+      el.llmBase.value = provider.base_url;
+    }
     loadModels(selected);
   }
 
   function selectProvider(id) {
     State.llm.provider = id;
     fillProviderSelect();
+    var provider = currentProvider();
+    el.llmBase.value = provider && provider.base_url ? provider.base_url : '';
     fillModels('');
   }
 
@@ -3275,25 +3284,29 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   }
 
   var lastActiveProfile = null;
+  var lastKeySet = null;
 
   function applyProfile(profile) {
     if (!State.llm) return;
     var activeId = profile ? profile.id : null;
-    if (activeId !== lastActiveProfile) {
+    var keySet = profile ? !!profile.key_set : false;
+    if (activeId !== lastActiveProfile || keySet !== lastKeySet) {
       modelsCache = {};
       lastActiveProfile = activeId;
+      lastKeySet = keySet;
     }
     State.llm.active = activeId;
     if (profile) {
       State.llm.provider = profile.provider || 'openai';
       el.llmName.value = profile.name || '';
-      fillModels(profile.model || '');
       el.llmBase.value = profile.base_url || '';
+      fillModels(profile.model || '');
       el.llmKey.value = '';
       el.llmKey.placeholder = profile.key_set ? 'ключ сохранён, можно заменить' : 'ключ не задан';
     } else {
       State.llm.provider = 'openai';
       el.llmName.value = '';
+      el.llmBase.value = '';
       fillModels('');
       el.llmKey.value = '';
       el.llmKey.placeholder = 'хранится на колонке';
@@ -5972,6 +5985,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     el.llmProviderSelect.addEventListener('change', function () {
       selectProvider(el.llmProviderSelect.value);
     });
+    if (el.llmBase) {
+      el.llmBase.addEventListener('change', function () {
+        loadModels(el.llmModel.value);
+      });
+    }
     el.llmModel.addEventListener('change', toggleCustomModel);
     el.btnLlmSave.addEventListener('click', saveLlm);
     el.btnLlmSystem.addEventListener('click', saveLlmSystem);
