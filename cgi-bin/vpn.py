@@ -302,9 +302,9 @@ def ensure_binary():
                 expected = fh.read(64).strip().split()[0].lower()
         except (OSError, IndexError):
             expected = ""
-    if not expected:
+    if not re.fullmatch(r"[0-9a-f]{64}", expected or ""):
         expected = PINNED_SHA256.get(VERSION, "")
-    if not expected:
+    if not re.fullmatch(r"[0-9a-f]{64}", expected or ""):
         raise RuntimeError("sing-box: нет SHA-256 для версии %s" % VERSION)
     digest = hashlib.sha256()
     with open(archive, "rb") as fh:

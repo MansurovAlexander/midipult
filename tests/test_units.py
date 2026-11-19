@@ -462,9 +462,11 @@ def test_state_player_fresh():
 def test_vpn_parsing():
     import base64
     import json
+    import re
 
     check("vpn: SHA-256 sing-box закреплён",
-          len(vpn.PINNED_SHA256.get(vpn.VERSION, "")) == 64,
+          bool(re.fullmatch(r"[0-9a-f]{64}",
+                            vpn.PINNED_SHA256.get(vpn.VERSION, ""))),
           vpn.VERSION)
 
     vless = vpn.parse_link(
