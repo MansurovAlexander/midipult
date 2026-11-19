@@ -49,6 +49,39 @@ git push -u origin main
 4. Не загружайте `tests/*.png`, `.mypult-station`, `push.log`, `auth.json`,
    `llm.json`, `vpn.json` и прочие файлы из `/data/mypult`.
 
+## CI на GitHub
+
+В репозитории есть workflow `.github/workflows/ci.yml`. Он запускается на
+каждый push в `main` и на каждый pull_request и проверяет то же, что
+описано в `AGENTS.md`:
+
+- синтаксис Python — `compileall` для `cgi-bin`, `service`, `tests` и
+  `py_compile index.py`;
+- синтаксис shell — `sh -n` для всех `deploy/*.sh` и `init.d/S99mypult`;
+- тесты — `tests/test_units.py` (191), `tests/static_checks.py` (121) и
+  `tests/run_cgi_tests.py` (42).
+
+Условия прогона: Ubuntu, Python 3.12, Node 24, права `contents: read`,
+таймаут 15 минут; новый прогон той же ветки отменяет предыдущий
+(`concurrency` + `cancel-in-progress`). Статус виден в PR на вкладке
+**Checks**; по правилам проекта PR не мержится с красным CI.
+
+CI проверяет только код в репозитории. Установка, `preflight.sh` и работа
+железа (Luna, Glagol, IPC, свет, кольцо) на живой Станции Миди в CI **не**
+проверяются — об этом по-прежнему пишут в описании PR.
+
+Локальный запуск тех же тестов — в разделе 4 `AGENTS.md`:
+
+```sh
+python tests/test_units.py
+python tests/static_checks.py
+python tests/run_cgi_tests.py
+```
+
+Тест на переводах строк считает текстовыми `.html`, `.py`, `.conf`, `.sh`,
+`.md`, `.json`, `.ps1`, `.cmd`, `.yml` и `S99mypult`: CRLF допустим только в
+`.ps1`/`.cmd` (`.gitattributes`, `eol=crlf`), BOM — только в `.ps1`.
+
 ## Проверка перед публикацией
 
 ```powershell

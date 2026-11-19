@@ -435,6 +435,30 @@ API-шлюз для LED, дисплея, датчиков и микрофона.
 
 ---
 
+## Разработка и тесты
+
+Код проверяется автоматически в GitHub Actions
+(`.github/workflows/ci.yml`): на каждый push в `main` и на каждый
+pull_request на Ubuntu с Python 3.12 прогоняются синтаксис Python
+(`compileall`, `py_compile index.py`), `sh -n` для `deploy/*.sh` и
+`init.d/S99mypult`, затем юнит-, статические и CGI-тесты. Статус виден в PR
+на вкладке **Checks**.
+
+Локально те же тесты запускаются на колонке (или на машине с Python 3):
+
+```sh
+python tests/test_units.py       # 191 проверка
+python tests/static_checks.py    # 121 проверка
+python tests/run_cgi_tests.py    # 42 проверки
+```
+
+CI не поднимает колонку: установка, `preflight.sh` и работа Luna/Glagol/IPC
+проверяются только вручную на живой Станции Миди. Правила веток, ревью и
+проверок — в [AGENTS.md](AGENTS.md); публикация и CI — в
+[docs/GITHUB.md](docs/GITHUB.md).
+
+---
+
 ## Документация
 
 - [FAQ.md](FAQ.md) — частые вопросы, команды, проблемы и решения.
@@ -445,6 +469,8 @@ API-шлюз для LED, дисплея, датчиков и микрофона.
   с пультом, что нельзя исправить и как обойти.
 - [docs/AITUNNEL.md](docs/AITUNNEL.md) — провайдер AITUNNEL, веб-поиск,
   карты ошибок, свои сообщения, список моделей и установка.
+- [docs/GITHUB.md](docs/GITHUB.md) — публикация репозитория, что не попадает
+  в git, CI и проверка перед публикацией.
 - [CHANGELOG.md](CHANGELOG.md) — история версий.
 
 ---

@@ -110,8 +110,15 @@
   `voice_daemon.py`, `state_daemon.py` и `myweb.conf`. При несовпадении
   пишет «pid N не похож на … — не трогаю» и удаляет pid-файл; `--dry-run`
   не посылает сигналов и ничего не удаляет.
-- Тесты: 191 проверка `test_units`, 121 `static_checks` (одна известная про
-  CRLF; добавлены две проверки `deploy/uninstall.sh`), 42 `run_cgi`.
+- Тесты: `static_checks` больше не имеет известного CRLF-провала — CRLF
+  запрещён везде, кроме `.ps1`/`.cmd` (для них в `.gitattributes` задано
+  `eol=crlf`), BOM допустим только у `.ps1`, а `TEXT_EXT` включает `.yml` и
+  `.cmd`. Счётчики: 191 `test_units`, 121 `static_checks`, 42 `run_cgi`.
+- CI: добавлен GitHub Actions (`.github/workflows/ci.yml`) — push в `main` и
+  pull_request, Ubuntu, Python 3.12, Node 24, `permissions: contents: read`,
+  отмена устаревшего прогона, таймаут 15 минут. Шаги: `compileall` и
+  `py_compile index.py`, `sh -n` для `deploy/*.sh` и `init.d/S99mypult`,
+  юнит-, статические и CGI-тесты.
 
 ## 0.4.68 — 2026-11-10
 
