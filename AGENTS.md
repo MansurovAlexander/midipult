@@ -64,9 +64,8 @@ python -c "import ast; ast.parse(open('service/voice_daemon.py', encoding='utf-8
 Shell:
 
 ```sh
-sh -n deploy/install.sh
-sh -n deploy/preflight.sh
-sh -n deploy/aitunnel-profile.sh
+for f in deploy/*.sh; do sh -n "$f"; done
+sh -n init.d/S99mypult
 ```
 
 JS (встроенный скрипт в `index.html`) — извлечь и проверить:
@@ -82,11 +81,42 @@ PY
 node --check /tmp/ui_check.js
 ```
 
+Тесты:
+
+```sh
+python tests/test_units.py       # 191 проверка
+python tests/static_checks.py    # 121 проверка
+python tests/run_cgi_tests.py    # 42 проверки
+```
+
 На колонке (если есть доступ):
 
 ```sh
 MYPULT_NO_PACKAGES=1 sh deploy/preflight.sh
 ```
+
+### 4.1. CI
+
+Те же проверки автоматически идут в GitHub Actions —
+`.github/workflows/ci.yml` (Python 3.12, Node 24, Ubuntu):
+
+- `python -m compileall -q cgi-bin service tests` и
+  `python -m py_compile index.py`;
+- `for f in deploy/*.sh; do sh -n "$f"; done` и `sh -n init.d/S99mypult`;
+- `tests/test_units.py`, `tests/static_checks.py`, `tests/run_cgi_tests.py`.
+
+Workflow запускается на push в `main` и на каждый pull_request, имеет
+`permissions: contents: read`, отменяет устаревший прогон той же ветки
+(`concurrency` + `cancel-in-progress`) и ограничен 15 минутами. Локальные
+проверки выше не заменяются: CI не видит колонку и не проверяет железо.
+
+### 4.2. Переводы строк и BOM
+
+`tests/static_checks.py` считает текстовыми `.html`, `.py`, `.conf`, `.sh`,
+`.md`, `.json`, `.ps1`, `.cmd`, `.yml` и `S99mypult`. CRLF запрещён везде,
+кроме `.ps1`/`.cmd` (для них в `.gitattributes` задано `eol=crlf`);
+BOM допустим только у `.ps1`. Остальные файлы — LF и без BOM, иначе
+`static_checks` падает на проверке «файлы без CRLF (кроме .ps1/.cmd) и BOM».
 
 В описании PR указать, что проверено на живой Станции Миди, а что — нет.
 
@@ -108,6 +138,6 @@ MYPULT_NO_PACKAGES=1 sh deploy/preflight.sh
 
 - Ревью `APPROVED`.
 - Документация обновлена `docs-auditor`.
-- Проверки из раздела 4 пройдены.
+- Проверки из раздела 4 пройдены, CI на GitHub зелёный.
 - Есть отметка о тесте на живой колонке (или явно указано, что не проверялось).
 - PR смержен в `main`.

@@ -101,6 +101,7 @@ init.d/S99mypult           init-скрипт (start/stop/restart/reload/status)
 lighttpd/myweb.conf        конфиг веб-сервера
 deploy/                    установка и заливка с Windows
 tests/                     статические, юнит- и CGI-тесты
+.github/workflows/ci.yml   CI: синтаксис, shell, тесты на Ubuntu
 ```
 
 ---
@@ -420,8 +421,9 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 ## 9. Тесты
 
 - `tests/static_checks.py` — 121 проверка: структура HTML, дубликаты id,
-  версия/CHANGELOG, кодировка и переводы строк (одна проверка про CRLF
-  известна и не блокирует), кеш моделей в UI «Нейросеть»; отдельно
+  версия/CHANGELOG, кодировка и переводы строк (CRLF запрещён везде, кроме
+  `.ps1`/`.cmd`, где он задан в `.gitattributes`; BOM — только у `.ps1`),
+  кеш моделей в UI «Нейросеть»; отдельно
   проверяется, что в `vpn.py` есть `PINNED_SHA256`, а распаковка `sing-box`
   идёт без `sh`/`gzip -dc` — через `tarfile` с `filter="data"`,
   `issym()`/`islnk()`; ещё две проверки относятся к `deploy/uninstall.sh`:
@@ -432,6 +434,9 @@ CGI запускаются от root: иначе недоступны sysfs, `am
   параллельная запись не ломает файл; формат закреплённого SHA-256 `sing-box`;
 - `tests/run_cgi_tests.py` — 42 проверки CGI на стенде.
 
+Прогон зелёный: 191/0, 121/0 и 42/0; известных провалов, в том числе по
+CRLF, нет — именно на таком состоянии проходят и CI, и локальные проверки.
+
 Запуск:
 
 ```sh
@@ -439,6 +444,14 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 /opt/bin/python3 tests/test_units.py
 /opt/bin/python3 tests/run_cgi_tests.py
 ```
+
+Те же проверки выполняет GitHub Actions (`.github/workflows/ci.yml`) на
+Ubuntu с Python 3.12: `compileall` для `cgi-bin`, `service`, `tests`,
+`py_compile index.py`, `sh -n` для `deploy/*.sh` и `init.d/S99mypult`, затем
+все три набора тестов. Workflow срабатывает на push в `main` и на
+pull_request, имеет `permissions: contents: read`, таймаут 15 минут и
+отменяет устаревший прогон той же ветки. CI не поднимает колонку: установка
+и железо проверяются вручную.
 
 ---
 
