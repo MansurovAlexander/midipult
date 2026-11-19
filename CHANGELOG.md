@@ -102,8 +102,16 @@
   `filter="data"` вместо `sh -c "gzip -dc | tar -xf"`; запрещены абсолютные
   пути, `..` в компонентах, symlink/hardlink и элементы, кроме обычных файлов
   и каталогов. Shell в этом шаге больше не участвует.
-- Тесты: 191 проверка `test_units`, 119 `static_checks` (одна известная про
-  CRLF), 42 `run_cgi`.
+- Удаление: `deploy/uninstall.sh` не убивает процесс по одному числу из
+  pid-файла. `stop_pidfile()` читает только цифры, отбрасывает пустой pid и
+  pid с ведущим нулём (`kill 0` убил бы группу процессов), для
+  `/data/mypult/voice.pid`, `/tmp/mypult-state.pid` и
+  `/tmp/mypult-lighttpd.pid` сверяет `/proc/<pid>/cmdline` с
+  `voice_daemon.py`, `state_daemon.py` и `myweb.conf`. При несовпадении
+  пишет «pid N не похож на … — не трогаю» и удаляет pid-файл; `--dry-run`
+  не посылает сигналов и ничего не удаляет.
+- Тесты: 191 проверка `test_units`, 121 `static_checks` (одна известная про
+  CRLF; добавлены две проверки `deploy/uninstall.sh`), 42 `run_cgi`.
 
 ## 0.4.68 — 2026-11-10
 
