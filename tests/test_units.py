@@ -1117,9 +1117,43 @@ def test_llm_profile_id():
           ids == ["chatgpt", "chatgpt-2", "chatgpt-3"], str(ids))
 
 
+def test_write_json_atomic():
+    import json as json_mod
+    import shutil
+    import tempfile
+    import threading
+
+    folder = tempfile.mkdtemp(prefix="mypult-json-")
+    path = os.path.join(folder, "data.json")
+    try:
+        common.write_json(path, {"a": 1})
+        with open(path, "r", encoding="utf-8") as fh:
+            check("json: запись и чтение", json_mod.load(fh) == {"a": 1})
+        check("json: временный файл не остался",
+              os.listdir(folder) == ["data.json"], str(os.listdir(folder)))
+
+        def worker(value):
+            for _ in range(15):
+                common.write_json(path, {"value": value, "pad": "x" * 500})
+
+        threads = [threading.Thread(target=worker, args=(index,))
+                   for index in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json_mod.load(fh)
+        check("json: параллельная запись не ломает файл",
+              data.get("value") in range(4), str(data)[:200])
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def main():
     for test in (
         test_generic_helpers,
+        test_write_json_atomic,
         test_volume_discovery,
         test_volume_parse,
         test_volume_set,

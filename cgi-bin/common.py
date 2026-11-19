@@ -16,6 +16,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -127,20 +128,28 @@ AUTH_PATH = os.environ.get("MYPULT_AUTH_PATH") or "/data/mypult/auth.json"
 
 
 def write_json(path, data, mode=0o600, **kwargs):
-    """Атомарно записать JSON: временный файл + rename."""
-    folder = os.path.dirname(path)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, ensure_ascii=False, **kwargs)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    """Атомарно записать JSON: уникальный временный файл + rename."""
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(
+        prefix=os.path.basename(path) + ".", suffix=".tmp", dir=folder)
     try:
-        os.chmod(path, mode)
-    except OSError:
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, **kwargs)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.chmod(tmp, mode)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def auth_config():
