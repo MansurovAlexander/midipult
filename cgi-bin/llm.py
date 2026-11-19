@@ -244,12 +244,20 @@ def ask(prompt, system=None):
     if provider == "deepseek":
         # Без «размышлений» deepseek-flash отвечает ~1.5 с вместо 10–15 с.
         payload["thinking"] = {"type": "disabled"}
+    # AITUNNEL: серверный веб-поиск. Модель сама решает, когда искать.
+    if "aitunnel.ru" in base_url:
+        payload["tools"] = [{
+            "type": "aitunnel:web_search",
+            "parameters": {"engine": "parallel", "mode": "basic",
+                           "max_results": 3, "max_uses": 1},
+        }]
     request = urllib.request.Request(
         base_url + "/chat/completions",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
             "Authorization": "Bearer " + profile["key"],
+            "User-Agent": "MidiPult/0.4.68",
         },
         method="POST",
     )
@@ -269,12 +277,22 @@ def ask(prompt, system=None):
         return
 
     try:
-        answer = body["choices"][0]["message"]["content"]
+        message = body["choices"][0].get("message") or {}
     except (KeyError, IndexError, TypeError):
         common.fail(502, "Неожиданный ответ API", detail=str(body)[:400])
         return
 
-    answer = answer.strip()
+    answer = message.get("content")
+    if answer is None:
+        answer = message.get("reasoning") or ""
+    answer = str(answer)
+    # Ссылки на источники и markdown в озвучке не нужны.
+    answer = re.sub(r"\[\d+\]", "", answer)
+    answer = re.sub(r"[*_`#>]+", "", answer)
+    answer = re.sub(r"\s{2,}", " ", answer).strip()
+    if not answer:
+        common.fail(502, "Модель вернула пустой ответ", detail=str(body)[:400])
+        return
     history = chat.setdefault("messages", [])
     history.append({"role": "user", "content": prompt})
     history.append({"role": "assistant", "content": answer})
