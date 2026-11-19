@@ -794,6 +794,107 @@ def test_voice_chat_actions():
         voice_daemon.llm_info = old_info
 
 
+def test_voice_routing_guards():
+    import json as json_mod
+    import tempfile
+
+    check("голос: вопрос про VPN не команда",
+          voice_daemon.match("Алиса, как включить впн?") is None,
+          str(voice_daemon.match("Алиса, как включить впн?")))
+    check("голос: вопрос про нейросеть не команда",
+          voice_daemon.match("Алиса, можно ли выключить нейросеть?") is None,
+          str(voice_daemon.match("Алиса, можно ли выключить нейросеть?")))
+    check("голос: вопрос с «что такое» не команда",
+          voice_daemon.match("Алиса, что такое впн и как его включить") is None,
+          str(voice_daemon.match("Алиса, что такое впн и как его включить")))
+    check("голос: императив включает VPN",
+          voice_daemon.match("Алиса, включи впн") == ("vpn", "on"),
+          str(voice_daemon.match("Алиса, включи впн")))
+    check("голос: «какие радио» остаётся списком",
+          voice_daemon.match("Алиса, какие радио ты знаешь") == ("radio_list", "list"),
+          str(voice_daemon.match("Алиса, какие радио ты знаешь")))
+    check("голос: вежливый императив включает VPN",
+          voice_daemon.match("Алиса, пожалуйста, включи впн") == ("vpn", "on"),
+          str(voice_daemon.match("Алиса, пожалуйста, включи впн")))
+    check("голос: «скажи как включить» не команда",
+          voice_daemon.match("Алиса, скажи как включить впн") is None,
+          str(voice_daemon.match("Алиса, скажи как включить впн")))
+    check("голос: вежливый префикс не мешает команде плеера",
+          voice_daemon.alice_owns("Алиса, пожалуйста, следующий") is True)
+    check("голос: «сделай погромче» — команда Алисы",
+          voice_daemon.alice_owns("Алиса, сделай погромче") is True)
+
+    old_path = voice_daemon.SCENARIO_PATH
+    old_mtime = voice_daemon._SCENARIO_MTIME
+    old_phrases = list(voice_daemon._SCENARIO_PHRASES)
+    fd, path = tempfile.mkstemp(prefix="mypult-scenarios-", suffix=".json")
+    os.close(fd)
+    try:
+        voice_daemon.SCENARIO_PATH = path
+        os.remove(path)
+        voice_daemon._SCENARIO_MTIME = None
+        voice_daemon._SCENARIO_PHRASES = []
+        check("сценарии: нет файла — не совпадает",
+              voice_daemon.scenario_may_match("пауза") is False)
+
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{")
+        voice_daemon._SCENARIO_MTIME = None
+        check("сценарии: битый файл — не совпадает",
+              voice_daemon.scenario_may_match("пауза") is False)
+
+        with open(path, "w", encoding="utf-8") as fh:
+            json_mod.dump({"scenarios": [{"phrases": ["пауза"]}]}, fh)
+        voice_daemon._SCENARIO_MTIME = None
+        check("сценарии: фраза находится",
+              voice_daemon.scenario_may_match("пауза") is True)
+    finally:
+        voice_daemon.SCENARIO_PATH = old_path
+        voice_daemon._SCENARIO_MTIME = old_mtime
+        voice_daemon._SCENARIO_PHRASES = old_phrases
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def test_voice_switch_dry_run():
+    calls = []
+    old = (voice_daemon.post, voice_daemon.announce, voice_daemon.llm_info,
+           voice_daemon.llm_enabled, voice_daemon.scenario_may_match,
+           voice_daemon.stop_music_soon)
+    try:
+        voice_daemon.post = lambda url, payload, timeout=60: calls.append(
+            ("post", payload)) or {}
+        voice_daemon.announce = lambda text, pause=False: calls.append(("say", text))
+        voice_daemon.llm_info = lambda: {"profiles": [
+            {"id": "deepseek", "name": "DeepSeek", "provider": "deepseek"}]}
+        voice_daemon.llm_enabled = lambda: True
+        voice_daemon.scenario_may_match = lambda text: False
+        voice_daemon.stop_music_soon = lambda *args, **kwargs: calls.append(("music",))
+
+        check("голос: mute не переключает профиль",
+              voice_daemon.should_silence("Алиса, включи дипсик") is True
+              and not calls, str(calls))
+        check("голос: команда плеера не глушится",
+              voice_daemon.should_silence("Алиса, пожалуйста, следующий") is False
+              and not calls, str(calls))
+        check("голос: dry-run не переключает профиль",
+              voice_daemon.llm_switch("включи дипсик", dry_run=True) is True
+              and not calls, str(calls))
+
+        calls[:] = []
+        voice_daemon.llm_switch("включи дипсик")
+        posts = [item for item in calls if item[0] == "post"]
+        says = [item for item in calls if item[0] == "say"]
+        check("голос: реальное переключение ровно одно",
+              len(posts) == 1 and len(says) == 1, str(calls))
+    finally:
+        (voice_daemon.post, voice_daemon.announce, voice_daemon.llm_info,
+         voice_daemon.llm_enabled, voice_daemon.scenario_may_match,
+         voice_daemon.stop_music_soon) = old
+
+
 def test_llm_errors_and_models():
     import json as json_mod
     import urllib.error
@@ -921,6 +1022,8 @@ def main():
         test_llm_profile_id,
         test_voice_chat_commands,
         test_voice_chat_actions,
+        test_voice_routing_guards,
+        test_voice_switch_dry_run,
     ):
         try:
             test()
