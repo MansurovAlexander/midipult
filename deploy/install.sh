@@ -25,7 +25,7 @@ warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = "0" ] || die "нужен root"
-[ -d "$WEB" ] || die "нет каталога $WEB"
+mkdir -p "$WEB" || die "не могу создать $WEB"
 [ -f "$SRC/index.html" ] || die "не найден $SRC/index.html"
 
 if [ -f "$SRC/deploy/preflight.sh" ]; then
@@ -127,9 +127,9 @@ say "права на запуск"
 chmod 755 "$WEB/cgi-bin/"*.py || die "chmod не удался"
 
 if ! "$PY" -c 'import websocket' >/dev/null 2>&1; then
-    say "ставлю python3-websocket-client"
-    yes 2>/dev/null | /opt/bin/opkg install python3-websocket-client >>/tmp/mypult.log 2>&1 || \
-        warn "не смог поставить python3-websocket-client — плеер будет недоступен"
+    say "ставлю websocket-client через pip"
+    "$PY" -m pip install --no-cache-dir websocket-client >>/tmp/mypult.log 2>&1 || \
+        warn "не смог поставить websocket-client — плеер будет недоступен"
 fi
 command -v amixer >/dev/null 2>&1 || warn "amixer не найден — громкость пойдёт через Glagol"
 

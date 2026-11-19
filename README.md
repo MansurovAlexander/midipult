@@ -4,11 +4,14 @@
   <img src="docs/img/logo.png" alt="MidiPult — панель Яндекс Станции Миди" width="520">
 </p>
 
-[![Release](https://img.shields.io/github/v/release/RoBiN19666/midipult?style=flat-square&label=release)](https://github.com/RoBiN19666/midipult/releases)
-[![License](https://img.shields.io/github/license/RoBiN19666/midipult?style=flat-square&label=license)](https://github.com/RoBiN19666/midipult/blob/main/LICENSE)
+[![Upstream release](https://img.shields.io/github/v/release/RoBiN19666/midipult?style=flat-square&label=upstream)](https://github.com/RoBiN19666/midipult/releases)
+[![License](https://img.shields.io/github/license/MansurovAlexander/midipult?style=flat-square&label=license)](https://github.com/MansurovAlexander/midipult/blob/main/LICENSE)
 
 > **Форк.** Добавлены провайдер AITUNNEL, веб-поиск, карты ошибок и загрузка
 > списка моделей. Подробности — [docs/AITUNNEL.md](docs/AITUNNEL.md).
+> Бейдж release и ссылка ведут на **upstream**: в этом форке релизы панели
+> пока не публикуются, обновление из панели появится после первого релиза
+> (см. [Ограничения](#ограничения)).
 
 > **⚠️ ВАЖНО:**
 > **Проект не связан с Яндексом. Использование только на вашем собственном
@@ -167,9 +170,11 @@ CGI-скрипты, вёрстка и установщик сгенериров�
   уведомление «Колонка перезагружена»;
 - **резервная копия** настроек (LLM, VPN, сценарии, радио, DNS, кольцо, чаты,
   голос, автояркость, яркость/режим дисплея) и восстановление из файла;
-- **обновления из панели**: раз в сутки проверка GitHub Releases, карточка
-  текущей/доступной версии, окно «Обновить / Отмена», release notes,
-  скачивание архива с SHA-256, бэкап и откат при ошибке;
+- **обновления из панели**: раз в сутки проверка GitHub Releases форка
+  (`MansurovAlexander/midipult`), карточка текущей/доступной версии, окно
+  «Обновить / Отмена», release notes, скачивание архива с SHA-256, бэкап и
+  откат при ошибке. Пока в форке нет опубликованных релизов панели, карточка
+  не появляется (см. [Ограничения](#ограничения));
 - **системные звуки**: список, прослушивание ▶, скачивание, автобэкап
   оригинала и замена drag-and-drop; входной файл конвертируется в Ogg Opus
   48 кГц моно или WAV 48 кГц моно через GStreamer. MP3-цель принимается только
@@ -203,11 +208,13 @@ CGI-скрипты, вёрстка и установщик сгенериров�
 - для VPN — доступ в интернет и ~20 МБ свободного места.
 
 Остальное установщик проверяет и **ставит сам**, если есть Entware:
-`python3`, `lighttpd`, `lighttpd-mod-cgi`, `lighttpd-mod-proxy`, `curl`,
-`python3-websocket-client`. Проверка — `deploy/preflight.sh`.
+`python3`, `lighttpd`, `lighttpd-mod-cgi`, `lighttpd-mod-proxy`, `curl` — через
+`opkg`. Для `websocket-client` отдельного пакета в Entware нет: после
+неудачного `opkg` установщик пробует `python3 -m pip install websocket-client`
+(если в Entware есть `pip`). Проверка — `deploy/preflight.sh`.
 
 Если пакеты ставить нельзя, запустите с `MYPULT_NO_PACKAGES=1` — установщик
-только проверит и покажет, чего не хватает.
+только проверит и покажет, чего не хватает; `pip` при этом тоже не запускается.
 
 ---
 
@@ -234,7 +241,9 @@ CGI-скрипты, вёрстка и установщик сгенериров�
    sh deploy/install.sh
    ```
    Скрипт сам проверит root/Entware/пакеты, поставит недостающие через
-   `opkg`, создаст автозапуск и запустит пульт.
+   `opkg` (а `websocket-client` — через `pip`), создаст каталог веб-рута
+   `/data/myweb`, настроит автозапуск и запустит пульт. Создавать
+   `/data/myweb` вручную не нужно.
 3. Если автозапуск не создался — вручную:
    ```sh
    /opt/etc/init.d/S99mypult start
@@ -254,10 +263,13 @@ CGI-скрипты, вёрстка и установщик сгенериров�
 - проверяет `/proc/device-tree/model`: это должна быть Станция Миди
   (`Cucumber`/`Midi`), иначе установка отменяется;
 - проверяет `python3`, `lighttpd`, `mod_cgi`, `mod_proxy`, `curl`,
-  `python3-websocket-client`;
-- при отсутствии делает `opkg update` и `opkg install`;
-- проверяет Luna, IPC `9875`, `amixer`, `wpa_cli`, свободное место;
-- `MYPULT_NO_PACKAGES=1` — только отчёт без установки.
+  `websocket-client`;
+- при отсутствии делает `opkg update` и `opkg install`; `websocket-client`
+  в Entware отсутствует, поэтому после неудачного `opkg` пробуется
+  `python3 -m pip install websocket-client`;
+- проверяет Luna, IPC `9875`, `amixer`, `wpa_cli` и свободное место
+  на `/` и `/data` (минимум ~20 МБ на каждом);
+- `MYPULT_NO_PACKAGES=1` — только отчёт без установки пакетов и без `pip`.
 
 Установщик вызывает его автоматически до копирования файлов.
 
@@ -359,7 +371,14 @@ sh /data/mypult/uninstall.sh --purge
 - **Региональное радио** не выбирается: пульт передаёт Алисе только название,
   а поток и регион выбирает её каталог.
 - **Статический IP** и HTTPS не реализованы осознанно.
-- Автообновление с GitHub не включено: репозитория пока нет.
+- **Автообновление из панели** встроено и по умолчанию смотрит в форк
+  `MansurovAlexander/midipult`, но опубликованных релизов панели там пока нет:
+  панель отвечает «Релизы панели не найдены» и upstream-обновление не
+  предлагает. Обновление заработает после публикации релиза с архивом
+  `midipult-<версия>.tar.gz` и `.sha256`. Репозиторий можно переопределить
+  переменной `MYPULT_UPDATE_REPO` (URL API — `MYPULT_UPDATE_API`), но это
+  dev-ручка: с устройства переменные окружения lighttpd не пробрасываются,
+  задавать их нужно в init-скрипте или окружении запуска.
 - FastCGI в этой сборке отсутствует; его роль для `/state` выполняет
   постоянный локальный демон.
 

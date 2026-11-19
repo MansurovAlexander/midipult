@@ -29,11 +29,13 @@ case "$MODEL" in
 esac
 say "модель: $MODEL"
 
-# Сколько места на корне (КБ)
-free_kb=$(df -k / 2>/dev/null | awk 'NR==2 {print $4}')
-if [ -n "$free_kb" ] && [ "$free_kb" -lt 20000 ] 2>/dev/null; then
-    die "мало места на / (${free_kb} КБ), нужно хотя бы 20 МБ"
-fi
+# Сколько места на разделах, куда реально пишет установщик.
+for mount in / /data; do
+    free_kb=$(df -k "$mount" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$free_kb" ] && [ "$free_kb" -lt 20000 ] 2>/dev/null; then
+        die "мало места на $mount (${free_kb} КБ), нужно хотя бы 20 МБ"
+    fi
+done
 
 missing=""
 
@@ -82,9 +84,18 @@ fi
 [ -f /opt/lib/lighttpd/mod_proxy.so ] || ensure_pkg lighttpd-mod-proxy "прокси Luna"
 [ -x /opt/bin/curl ] || ensure_pkg curl "HTTP-запросы"
 
-# websocket-client нужен плееру/Glagol
+# websocket-client нужен плееру/Glagol. В Entware отдельного пакета нет,
+# поэтому после opkg пробуем pip.
 if [ -x /opt/bin/python3 ] && ! /opt/bin/python3 -c 'import websocket' >/dev/null 2>&1; then
-    ensure_pkg python3-websocket-client "WebSocket Glagol" || \
+    ensure_pkg python3-websocket-client "WebSocket Glagol" || true
+    if ! /opt/bin/python3 -c 'import websocket' >/dev/null 2>&1; then
+        if [ "$NO_PACKAGES" != "1" ] && /opt/bin/python3 -m pip --version >/dev/null 2>&1; then
+            say "ставлю websocket-client через pip"
+            /opt/bin/python3 -m pip install --no-cache-dir websocket-client >>"$LOG" 2>&1 || \
+                warn "pip не смог поставить websocket-client"
+        fi
+    fi
+    /opt/bin/python3 -c 'import websocket' >/dev/null 2>&1 || \
         warn "плеер может не работать без python3-websocket-client"
 fi
 
