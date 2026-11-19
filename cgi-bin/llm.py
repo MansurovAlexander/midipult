@@ -29,6 +29,48 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "llm.json")
 CHATS_PATH = os.path.join(CONFIG_DIR, "chats.json")
 
 USER_AGENT = "MidiPult/0.4.68"
+MAX_RESPONSE = 2 * 1024 * 1024
+
+
+def read_json_response(response, limit=MAX_RESPONSE):
+    """Прочитать JSON-ответ с ограничением размера.
+
+    ValueError (включая JSONDecodeError) означает негодный ответ провайдера;
+    вызывающий превращает его в 502, а не в 500.
+    """
+    raw = response.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("ответ больше %d байт" % limit)
+    return json.loads(raw.decode("utf-8"))
+
+
+def chat_answer(body):
+    """Текст ответа из OpenAI-совместимого тела.
+
+    None — тело не похоже на chat/completions; "" — тело корректное, но модель
+    ничего не сказала (например, content: null без reasoning).
+    """
+    if not isinstance(body, dict):
+        return None
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0] if isinstance(choices[0], dict) else None
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        return None
+    answer = message.get("content")
+    if answer is None:
+        answer = message.get("reasoning")
+    if isinstance(answer, list):
+        parts = []
+        for item in answer:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or ""))
+            elif isinstance(item, str):
+                parts.append(item)
+        answer = " ".join(parts)
+    return str(answer or "").strip()
 
 
 def normalize_provider(provider):
@@ -355,7 +397,7 @@ def public_profile(profile):
     return {
         "id": profile.get("id"),
         "name": profile.get("name"),
-        "provider": profile.get("provider") or "openai",
+        "provider": normalize_provider(profile.get("provider")),
         "model": profile.get("model") or "",
         "base_url": profile.get("base_url") or "",
         "key_set": bool(profile.get("key")),
@@ -377,7 +419,7 @@ def info(config=None):
     active = active_profile(config)
     chats = load_chats()
     chat = active_chat(chats)
-    provider = (active or {}).get("provider") or "openai"
+    provider = normalize_provider((active or {}).get("provider"))
     stored = ""
     messages = config.get("error_messages")
     if isinstance(messages, dict):
@@ -462,7 +504,13 @@ def ask(prompt, system=None):
         common.fail(400, "Не задан API-ключ", hint="Вставьте ключ и нажмите «Сохранить»")
         return
 
-    provider = profile.get("provider") or "openai"
+    model = str(profile.get("model") or "").strip()
+    if not model:
+        common.fail(400, "Не выбрана модель",
+                    hint="Выберите модель в карточке «Нейросеть»")
+        return
+
+    provider = normalize_provider(profile.get("provider"))
     base_url = (profile.get("base_url") or PROVIDERS.get(provider, {}).get("base_url") or "").rstrip("/")
     if not base_url:
         common.fail(400, "Не задан base_url для своего провайдера")
@@ -486,11 +534,11 @@ def ask(prompt, system=None):
     messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "model": profile.get("model") or "gpt-4o-mini",
+        "model": model,
         "messages": messages,
         "temperature": 0.7,
         # Длина ответа настраивается в панели (260 / 700 / 1400).
-        "max_tokens": max(50, min(int(config.get("max_tokens") or 260), 2000)),
+        "max_tokens": common.to_int(config.get("max_tokens"), 260, 50, 2000),
     }
     if provider == "deepseek":
         # Без «размышлений» deepseek-flash отвечает ~1.5 с вместо 10–15 с.
@@ -514,7 +562,7 @@ def ask(prompt, system=None):
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
-            body = json.loads(response.read().decode("utf-8"))
+            body = read_json_response(response)
     except urllib.error.HTTPError as exc:
         raw = ""
         try:
@@ -541,6 +589,9 @@ def ask(prompt, system=None):
         common.fail(502, short, hint=hint[:300], detail=raw[:400],
                     error_type=etype or None, provider_status=exc.code)
         return
+    except ValueError as exc:
+        common.fail(502, "Неожиданный ответ API", detail=str(exc)[:200])
+        return
     except (urllib.error.URLError, OSError) as exc:
         common.fail(502, "Нет связи с сервисом нейросети",
                     hint="Проверь интернет на колонке; если провайдер блокирует "
@@ -548,16 +599,10 @@ def ask(prompt, system=None):
                     detail=str(exc)[:200])
         return
 
-    try:
-        message = body["choices"][0].get("message") or {}
-    except (KeyError, IndexError, TypeError):
+    answer = chat_answer(body)
+    if answer is None:
         common.fail(502, "Неожиданный ответ API", detail=str(body)[:400])
         return
-
-    answer = message.get("content")
-    if answer is None:
-        answer = message.get("reasoning") or ""
-    answer = str(answer)
     # Ссылки на источники и markdown в озвучке не нужны.
     answer = re.sub(r"\[\d+\]", "", answer)
     answer = re.sub(r"[*_`#>]+", "", answer)
@@ -578,8 +623,10 @@ def ask(prompt, system=None):
 
 def save_profile(config, data):
     profiles = config.get("profiles") or []
-    pid = data.get("profile_id")
-    profile = next((item for item in profiles if item.get("id") == pid), None) if pid else None
+    raw_pid = str(data.get("profile_id") or "").strip()
+    pid = slug(raw_pid) if raw_pid else ""
+    profile = next((item for item in profiles
+                    if slug(str(item.get("id") or "")) == pid), None) if pid else None
 
     name = str(data.get("name") or "").strip()
     provider = str(data.get("provider") or "").strip()
@@ -589,16 +636,16 @@ def save_profile(config, data):
 
     if profile is None:
         base_name = name or (PROVIDERS.get(provider, {}).get("title") if provider else "Профиль")
-        existing = {item.get("id") for item in profiles}
+        existing = {slug(str(item.get("id") or "")) for item in profiles}
         # profile_id позволяет вызывающему (deploy/aitunnel-profile.sh) получить
         # стабильный id: повторный запуск обновит профиль, а не создаст дубль.
-        requested = slug(str(pid or "").strip()) if str(pid or "").strip() else ""
-        candidate = requested if requested and requested not in existing else slug(base_name)
+        root = pid or slug(base_name)
+        candidate = root
         suffix = 2
         while candidate in existing:
-            candidate = "%s-%d" % (candidate, suffix)
+            candidate = "%s-%d" % (root, suffix)
             suffix += 1
-        profile = {"id": candidate, "name": base_name, "provider": provider or "openai",
+        profile = {"id": candidate, "name": base_name, "provider": normalize_provider(provider),
                    "model": "", "base_url": "", "key": ""}
         profiles.append(profile)
 
