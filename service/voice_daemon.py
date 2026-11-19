@@ -166,6 +166,13 @@ def normalize(text):
 
 VPN_WORDS = ("впн", "vpn", "в п н", "вэ пэ эн", "ви пи эн", "впэн", "впиэн")
 LLM_WORDS = ("нейросет", "нейронк", "нейро сеть", "нейро", "жпт", "gpt", "чат гпт")
+# Команды плеера и медиа — зона Алисы, в нейросеть их не отдаём.
+ALICE_MEDIA_WORDS = ("музык", "трек", "песн", "альбом", "плейлист",
+                     "исполнител", "артист", "подкаст", "аудиокниг")
+ALICE_PLAYER_WORDS = ("пауза", "продолж", "следующ", "предыдущ", "перемот",
+                      "играй", "играть", "поставь", "включи", "выключи",
+                      "вруби", "стоп", "останов", "громче", "тише",
+                      "громкость", "звук", "что играет")
 RADIO_LIST = ("какие радио", "какие станции", "список радио", "перечисли радио",
               "что за радио", "какие есть радио", "какие радиостанции",
               "какие радио ты знаешь", "какие радиостанции ты знаешь",
@@ -177,6 +184,16 @@ OFF_WORDS = ("выключи", "выключить", "отключи", "откл
 
 def has_any(text, words):
     return any(word in text for word in words)
+
+
+def alice_owns(text):
+    """Команды, которые должна обрабатывать штатная Алиса, а не LLM."""
+    low = normalize(text)
+    if not low:
+        return False
+    if has_any(low, ALICE_MEDIA_WORDS):
+        return True
+    return any(low.startswith(word) for word in ALICE_PLAYER_WORDS)
 
 
 def match(text):
@@ -585,6 +602,9 @@ def handle(text):
         # «свет» — зона реле через «Дом с Алисой», в нейросеть не отправляем.
         if "свет" in normalize(text):
             log("свет: не отдаю в LLM")
+            return False
+        if alice_owns(text):
+            log("алиса: не отдаю в LLM <- %r" % text)
             return False
         log("llm <- %r" % text)
         info = llm_info()
