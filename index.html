@@ -1131,6 +1131,15 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       <button class="btn sm ghost" id="btnLlmSystem">Сохранить промпт</button>
     </div>
 
+    <label class="llm-field" style="margin-top:10px"><span>Свои сообщения об ошибках</span>
+      <textarea id="llmErrors" rows="3" maxlength="4000"
+        placeholder="По строке: код или тип ошибки = текст. Например: 402=Кончились деньги. Пусто — стандартные сообщения провайдера."></textarea>
+    </label>
+    <div class="row between" style="margin-top:6px">
+      <span class="seg-note" id="llmErrorsStatus">Стандартные сообщения</span>
+      <button class="btn sm ghost" id="btnLlmErrors">Сохранить сообщения</button>
+    </div>
+
     <div class="llm-grid">
       <label class="llm-field"><span>Провайдер</span>
         <select id="llmProviderSelect" aria-label="Провайдер"></select>
@@ -3162,10 +3171,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     el.llmModelCustomWrap.hidden = el.llmModel.value !== '__custom';
   }
 
-  function fillModels(selected) {
-    var provider = currentProvider();
+  var modelsCache = {};
+
+  function fillModelOptions(models, selected) {
     el.llmModel.innerHTML = '';
-    (provider ? provider.models : []).forEach(function (name) {
+    (models || []).forEach(function (name) {
       var option = document.createElement('option');
       option.value = name;
       option.textContent = name;
@@ -3189,7 +3199,30 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       }
     }
     toggleCustomModel();
+  }
+
+  function loadModels(selected) {
+    var provider = currentProvider();
+    var cacheKey = provider ? provider.id : '';
+    if (modelsCache[cacheKey]) {
+      fillModelOptions(modelsCache[cacheKey], selected);
+      return;
+    }
+    cgi('llm.py', { models: 1 }, { timeout: 20000 }).then(function (data) {
+      var models = (data && data.models) || [];
+      if (!models.length) return;
+      modelsCache[cacheKey] = models;
+      fillModelOptions(models, selected || el.llmModel.value);
+    }).catch(function () {
+      // Нет ключа или сети — остаётся встроенный список провайдера.
+    });
+  }
+
+  function fillModels(selected) {
+    var provider = currentProvider();
+    fillModelOptions(provider ? provider.models : [], selected);
     if (provider && provider.base_url) el.llmBase.value = provider.base_url;
+    loadModels(selected);
   }
 
   function selectProvider(id) {
@@ -3236,6 +3269,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
 
   function applyProfile(profile) {
     if (!State.llm) return;
+    modelsCache = {};
     State.llm.active = profile ? profile.id : null;
     if (profile) {
       State.llm.provider = profile.provider || 'openai';
@@ -3291,6 +3325,10 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     if (el.llmSystem) {
       el.llmSystem.value = data.system_prompt || '';
       el.llmSystemStatus.textContent = data.system_prompt ? 'Свой промпт' : 'Стандартный промпт';
+    }
+    if (el.llmErrors) {
+      el.llmErrors.value = data.error_messages_text || '';
+      el.llmErrorsStatus.textContent = data.error_messages_custom ? 'Свои сообщения' : 'Сообщения провайдера';
     }
     applyProfile(findProfile(data.active));
     updateLlmStatus();
@@ -3351,6 +3389,16 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       toast(value ? 'Промпт сохранён' : 'Вернул стандартный промпт', 'ok');
     }).catch(function (err) {
       toast('Промпт: ' + err.message, 'bad');
+    });
+  }
+
+  function saveLlmErrors() {
+    var value = el.llmErrors.value;
+    return cgi('llm.py', { error_messages_text: value }, { timeout: 15000 }).then(function (data) {
+      applyLlmInfo(data);
+      toast(value ? 'Сообщения об ошибках сохранены' : 'Вернул стандартные сообщения', 'ok');
+    }).catch(function (err) {
+      toast('Сообщения об ошибках: ' + err.message, 'bad');
     });
   }
 
@@ -5911,6 +5959,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     el.llmModel.addEventListener('change', toggleCustomModel);
     el.btnLlmSave.addEventListener('click', saveLlm);
     el.btnLlmSystem.addEventListener('click', saveLlmSystem);
+    el.btnLlmErrors.addEventListener('click', saveLlmErrors);
     el.btnLlmAsk.addEventListener('click', askLlm);
     el.btnLlmSay.addEventListener('click', sayLlmAnswer);
     el.llmPrompt.addEventListener('keydown', function (ev) {
@@ -6191,6 +6240,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       'chatRenameDlg', 'chatRenameInput', 'btnChatRenameNo', 'btnChatRenameYes', 'llmLength',
       'llmEnabled', 'llmStatus', 'btnLlmSave', 'llmPrompt', 'btnLlmAsk', 'btnLlmSay',
       'llmSystem', 'btnLlmSystem', 'llmSystemStatus',
+      'llmErrors', 'btnLlmErrors', 'llmErrorsStatus',
       'llmAnswer', 'llmMeta',
       'vpnUrl', 'btnVpnSave', 'btnVpnToggle', 'vpnStatus', 'vpnServer', 'vpnLog', 'vpnAutostart',
       'btnVoiceDaemon', 'voiceDaemonStatus',

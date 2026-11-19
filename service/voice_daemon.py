@@ -18,6 +18,7 @@ import re
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8055"
@@ -626,8 +627,17 @@ def handle(text):
             try:
                 box["answer"] = post(BASE + "/cgi-bin/llm.py",
                                      {"prompt": text, "system": system}, timeout=90).get("answer")
+            except urllib.error.HTTPError as exc:
+                message = ""
+                try:
+                    payload = json.loads(exc.read().decode("utf-8", "replace"))
+                    message = str(payload.get("error") or "")
+                except (ValueError, OSError):
+                    message = ""
+                box["error"] = message or ("ошибка сервиса, код %s" % exc.code)
             except Exception as exc:  # noqa: BLE001
-                box["error"] = exc
+                box["error"] = "нет связи с сервисом"
+                box["detail"] = str(exc)
 
         worker = threading.Thread(target=ask_model, daemon=True)
         started_at = time.time()
@@ -639,16 +649,22 @@ def handle(text):
         worker.join(30)
 
         if "error" in box:
-            log("llm error: %s" % box["error"])
+            reason = str(box["error"]).strip().rstrip(".")
+            log("llm error: %s %s" % (reason, box.get("detail", "")))
+            say("Нейросеть прилегла: %s. Спроси Алису." % reason)
             return False
         answer = box.get("answer")
-        if answer:
-            generation = time.time() - started_at
-            stop_alice_speech()
-            say(answer)
-            log("llm answer: %d символов, генерация %.1f с"
-                % (len(answer), generation))
-            return True
+        if not answer:
+            reason = "не ответила вовремя" if worker.is_alive() else "промолчала"
+            log("llm empty answer: %s" % reason)
+            say("Нейросеть %s. Спроси Алису." % reason)
+            return False
+        generation = time.time() - started_at
+        stop_alice_speech()
+        say(answer)
+        log("llm answer: %d символов, генерация %.1f с"
+            % (len(answer), generation))
+        return True
 
     log("без команды: %r" % text)
     return False
