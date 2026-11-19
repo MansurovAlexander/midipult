@@ -3172,7 +3172,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   }
 
   var modelsCache = {};
-  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|^tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft)/i;
+  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|(^|\/)tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft|audio|realtime)/i;
 
   function fillModelOptions(models, selected) {
     el.llmModel.innerHTML = '';
@@ -3202,17 +3202,38 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     toggleCustomModel();
   }
 
+  function serverProfile() {
+    return findProfile(State.llm && State.llm.serverActive);
+  }
+
+  function modelsCacheKey(provider, base) {
+    if (!provider) return '';
+    var server = serverProfile();
+    var mark = 'no-key';
+    if (server && server.key_set && provider.id === server.provider
+        && (!base || base === (server.base_url || ''))) {
+      mark = 'key';
+    }
+    return provider.id + '|' + base + '|' + mark;
+  }
+
   function loadModels(selected) {
     var provider = currentProvider();
     if (!provider) return;
     var base = (el.llmBase.value || '').trim();
-    var cacheKey = provider.id + '|' + base;
+    var cacheKey = modelsCacheKey(provider, base);
     if (modelsCache[cacheKey]) {
       fillModelOptions(modelsCache[cacheKey], selected);
       return;
     }
     cgi('llm.py', { models: 1, provider: provider.id, base_url: base },
       { timeout: 45000 }).then(function (data) {
+      // Пока ждали каталог (до 45 с), провайдер/base могли сменить.
+      // Иначе ответ старого запроса перерисует селект чужими моделями.
+      if (cacheKey !== modelsCacheKey(currentProvider(),
+                                      (el.llmBase.value || '').trim())) {
+        return;
+      }
       var models = (data && data.models) || [];
       // В каталоге кроме чат-моделей есть embeddings, TTS, картинки и видео.
       var chatOnly = models.filter(function (id) { return !MODEL_BLOCK.test(id); });
@@ -3228,13 +3249,19 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   function fillModels(selected) {
     var provider = currentProvider();
     fillModelOptions(provider ? provider.models : [], selected);
-    if (provider && provider.base_url) el.llmBase.value = provider.base_url;
+    // Не затирать base_url профиля дефолтом провайдера: applyProfile
+    // выставляет base раньше, а selectProvider — явно.
+    if (provider && provider.base_url && !el.llmBase.value.trim()) {
+      el.llmBase.value = provider.base_url;
+    }
     loadModels(selected);
   }
 
   function selectProvider(id) {
     State.llm.provider = id;
     fillProviderSelect();
+    var provider = currentProvider();
+    el.llmBase.value = provider && provider.base_url ? provider.base_url : '';
     fillModels('');
   }
 
@@ -3275,25 +3302,36 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   }
 
   var lastActiveProfile = null;
+  var lastKeySet = null;
+  var lastServerKey = null;
 
   function applyProfile(profile) {
     if (!State.llm) return;
     var activeId = profile ? profile.id : null;
-    if (activeId !== lastActiveProfile) {
+    var keySet = profile ? !!profile.key_set : false;
+    var server = serverProfile();
+    var serverKey = server
+      ? [server.id, server.provider, server.base_url || '', !!server.key_set].join('|')
+      : '';
+    if (activeId !== lastActiveProfile || keySet !== lastKeySet
+        || serverKey !== lastServerKey) {
       modelsCache = {};
       lastActiveProfile = activeId;
+      lastKeySet = keySet;
+      lastServerKey = serverKey;
     }
     State.llm.active = activeId;
     if (profile) {
       State.llm.provider = profile.provider || 'openai';
       el.llmName.value = profile.name || '';
-      fillModels(profile.model || '');
       el.llmBase.value = profile.base_url || '';
+      fillModels(profile.model || '');
       el.llmKey.value = '';
       el.llmKey.placeholder = profile.key_set ? 'ключ сохранён, можно заменить' : 'ключ не задан';
     } else {
       State.llm.provider = 'openai';
       el.llmName.value = '';
+      el.llmBase.value = '';
       fillModels('');
       el.llmKey.value = '';
       el.llmKey.placeholder = 'хранится на колонке';
@@ -3319,6 +3357,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       providers: data.providers || [],
       profiles: data.profiles || [],
       active: data.active || null,
+      serverActive: data.active || null,
       enabled: !!(data.voice_enabled !== undefined ? data.voice_enabled : data.enabled),
       provider: 'openai',
       chats: data.chats || [],
@@ -3452,6 +3491,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     return withBusy(el.btnLlmSave, function () {
       return cgi('llm.py', payload, { timeout: 15000 }).then(function (data) {
         el.llmKey.value = '';
+        modelsCache = {};
         applyLlmInfo(data);
         toast('Профиль сохранён: ' + name, 'ok');
       }).catch(function (err) {
@@ -5972,6 +6012,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     el.llmProviderSelect.addEventListener('change', function () {
       selectProvider(el.llmProviderSelect.value);
     });
+    if (el.llmBase) {
+      el.llmBase.addEventListener('change', function () {
+        loadModels(el.llmModel.value);
+      });
+    }
     el.llmModel.addEventListener('change', toggleCustomModel);
     el.btnLlmSave.addEventListener('click', saveLlm);
     el.btnLlmSystem.addEventListener('click', saveLlmSystem);
