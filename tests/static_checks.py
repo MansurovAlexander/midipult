@@ -487,6 +487,15 @@ def test_llm_ui_cache():
           "audio|realtime" in html and "MODEL_BLOCK" in html)
 
 
+def test_uninstall_safety():
+    text = read(os.path.join(ROOT, "deploy", "uninstall.sh"))
+    check("uninstall: pid сверяется с cmdline",
+          "/proc/$pid/cmdline" in text and "tr -dc '0-9'" in text)
+    check("uninstall: проверяет voice/state/lighttpd",
+          "voice_daemon.py" in text and "state_daemon.py" in text
+          and '"myweb.conf"' in text)
+
+
 def main():
     for test in (
         test_encoding,
@@ -507,6 +516,7 @@ def main():
         test_python_headers,
         test_version,
         test_llm_ui_cache,
+        test_uninstall_safety,
     ):
         try:
             test()

@@ -76,9 +76,27 @@ fi
 
 stop_pidfile() {
     file="$1"
+    needle="${2:-}"
     [ -f "$file" ] || return 0
-    pid=$(cat "$file" 2>/dev/null)
-    [ -n "$pid" ] || { rm -f "$file"; return 0; }
+    pid=$(tr -dc '0-9' <"$file" 2>/dev/null)
+    case "$pid" in
+        ""|0*)
+            # Пустой/нулевой pid: kill 0 убил бы группу процессов.
+            run rm -f "$file"
+            return 0
+            ;;
+    esac
+    if [ -n "$needle" ] && [ -r "/proc/$pid/cmdline" ]; then
+        cmd=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)
+        case "$cmd" in
+            *"$needle"*) ;;
+            *)
+                warn "pid $pid не похож на $needle — не трогаю"
+                run rm -f "$file"
+                return 0
+                ;;
+        esac
+    fi
     if kill -0 "$pid" 2>/dev/null; then
         if [ "$DRY" = "1" ]; then
             say "dry-run: kill $pid ($file)"
@@ -96,9 +114,9 @@ stop_pidfile() {
 }
 
 say "останавливаю процессы пульта"
-stop_pidfile "$DATA/voice.pid"
-stop_pidfile "/tmp/mypult-state.pid"
-stop_pidfile "/tmp/mypult-lighttpd.pid"
+stop_pidfile "$DATA/voice.pid" "voice_daemon.py"
+stop_pidfile "/tmp/mypult-state.pid" "state_daemon.py"
+stop_pidfile "/tmp/mypult-lighttpd.pid" "myweb.conf"
 if [ "$DRY" != "1" ] && (ps 2>/dev/null | grep -q '[v]oice_daemon.py'); then
     warn "остался voice_daemon.py — проверьте вручную"
 fi
