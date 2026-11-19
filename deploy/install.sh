@@ -127,9 +127,13 @@ say "права на запуск"
 chmod 755 "$WEB/cgi-bin/"*.py || die "chmod не удался"
 
 if ! "$PY" -c 'import websocket' >/dev/null 2>&1; then
-    say "ставлю websocket-client через pip"
-    "$PY" -m pip install --no-cache-dir websocket-client >>/tmp/mypult.log 2>&1 || \
-        warn "не смог поставить websocket-client — плеер будет недоступен"
+    if [ "${MYPULT_NO_PACKAGES:-0}" = "1" ]; then
+        warn "websocket-client не установлен; MYPULT_NO_PACKAGES=1 — pip не запускаю"
+    else
+        say "ставлю websocket-client через pip"
+        "$PY" -m pip install --no-cache-dir websocket-client >>/tmp/mypult.log 2>&1 || \
+            warn "не смог поставить websocket-client — плеер будет недоступен"
+    fi
 fi
 command -v amixer >/dev/null 2>&1 || warn "amixer не найден — громкость пойдёт через Glagol"
 

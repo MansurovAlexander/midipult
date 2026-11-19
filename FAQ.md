@@ -575,12 +575,13 @@ GitHub.
 Если на колонке уже есть **root и Entware**, да: `deploy/preflight.sh` сначала
 проверит модель (`/proc/device-tree/model` — Cucumber/Midi), затем
 `python3`, `lighttpd`, `mod_cgi`, `mod_proxy`, `curl` и поставит недостающие
-через `opkg`. Отдельного `python3-websocket-client` в Entware нет: после
-неудачного `opkg` установщик пробует
+через `opkg`. Пакета `python3-websocket-client` в Entware нет, поэтому `opkg`
+для него не вызывается: при отсутствии модуля preflight сразу пробует
 `python3 -m pip install websocket-client`. `install.sh` сам создаёт
 `/data/myweb`. Без Entware установщик остановится — root и Entware он не
-создаёт. Только проверить (без `opkg` и `pip`):
-`MYPULT_NO_PACKAGES=1 sh deploy/install.sh`.
+создаёт. Проверить без установки: `MYPULT_NO_PACKAGES=1 sh deploy/preflight.sh`
+— `opkg` и `pip` не запускаются, отсутствие `websocket-client` даёт только
+предупреждение. `deploy/install.sh` тоже уважает этот флаг.
 
 ### Что запускается после ребута?
 

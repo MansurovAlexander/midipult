@@ -246,7 +246,9 @@ POST /cgi-bin/llm.py
    ```
 
    Установщик сам создаст веб-рут `/data/myweb`, поставит недостающие пакеты
-   через `opkg`, а `websocket-client` — через `pip`, если `opkg` его не нашёл.
+   через `opkg`, а `websocket-client` — сразу через `pip`: opkg-пакета
+   `python3-websocket-client` в Entware нет, поэтому `opkg` для него не
+   вызывается.
    Создавать `/data/myweb` вручную не нужно.
 
    С Windows удобнее `deploy/push-to-station.ps1 -Station <IP>`.

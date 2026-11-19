@@ -27,10 +27,13 @@
   доходят до LLM.
 - Установка: `deploy/install.sh` сам создаёт каталог веб-рута `/data/myweb`
   (`mkdir -p`); ручной шаг «создайте каталог» из документации убран.
-- Установка: `python3-websocket-client` в Entware отсутствует, поэтому
-  `deploy/preflight.sh` после неудачного `opkg` пробует
-  `python3 -m pip install websocket-client`; `install.sh` делает такой же
-  pip-fallback. При `MYPULT_NO_PACKAGES=1` pip не запускается.
+- Установка: `deploy/preflight.sh` больше не вызывает `ensure_pkg` для
+  `python3-websocket-client` — такого opkg-пакета в Entware нет. При отсутствии
+  модуля preflight сразу пробует `python3 -m pip install websocket-client`
+  (при `MYPULT_NO_PACKAGES=1` — ни `opkg`, ни `pip`); неудача даёт
+  предупреждение, а не `missing`, поэтому `MYPULT_NO_PACKAGES=1` больше не
+  падает из-за несуществующего пакета. `install.sh` уважает флаг и pip-шаг не
+  выполняет.
 - Установка: `deploy/preflight.sh` проверяет свободное место и на `/`, и на
   `/data` (минимум ~20 МБ), а не только на `/`.
 - Подсказки: при отсутствии `websocket-client` ответы `common.py`, `media.py`
@@ -66,7 +69,7 @@
   игнорируется — селект не перерисовывается чужими моделями.
 - UI «Нейросеть»: `MODEL_BLOCK` дополнительно скрывает `audio`/`realtime` и
   `tts-*` (включая `openai/tts-1`).
-- Тесты: 178 проверок `test_units`, 116 `static_checks` (одна известная про
+- Тесты: 178 проверок `test_units`, 118 `static_checks` (одна известная про
   CRLF), 42 `run_cgi`.
 
 ## 0.4.68 — 2026-11-10

@@ -211,12 +211,14 @@ CGI-скрипты, вёрстка и установщик сгенериров�
 
 Остальное установщик проверяет и **ставит сам**, если есть Entware:
 `python3`, `lighttpd`, `lighttpd-mod-cgi`, `lighttpd-mod-proxy`, `curl` — через
-`opkg`. Для `websocket-client` отдельного пакета в Entware нет: после
-неудачного `opkg` установщик пробует `python3 -m pip install websocket-client`
-(если в Entware есть `pip`). Проверка — `deploy/preflight.sh`.
+`opkg`. Пакета `python3-websocket-client` в Entware нет, поэтому `opkg` для него
+не вызывается: `deploy/preflight.sh` при отсутствии модуля сразу пробует
+`python3 -m pip install websocket-client` (если в Entware есть `pip`).
 
-Если пакеты ставить нельзя, запустите с `MYPULT_NO_PACKAGES=1` — установщик
-только проверит и покажет, чего не хватает; `pip` при этом тоже не запускается.
+Если пакеты ставить нельзя, запустите с `MYPULT_NO_PACKAGES=1` — `preflight.sh`
+только проверит и покажет, чего не хватает; `opkg` и `pip` при этом не
+запускаются, а отсутствие `websocket-client` даёт лишь предупреждение (запуск
+не отменяется). `deploy/install.sh` уважает этот флаг и pip-шаг не выполняет.
 
 ---
 
@@ -243,7 +245,7 @@ CGI-скрипты, вёрстка и установщик сгенериров�
    sh deploy/install.sh
    ```
    Скрипт сам проверит root/Entware/пакеты, поставит недостающие через
-   `opkg` (а `websocket-client` — через `pip`), создаст каталог веб-рута
+   `opkg` (а `websocket-client` — сразу через `pip`), создаст каталог веб-рута
    `/data/myweb`, настроит автозапуск и запустит пульт. Создавать
    `/data/myweb` вручную не нужно.
 3. Если автозапуск не создался — вручную:
@@ -266,12 +268,15 @@ CGI-скрипты, вёрстка и установщик сгенериров�
   (`Cucumber`/`Midi`), иначе установка отменяется;
 - проверяет `python3`, `lighttpd`, `mod_cgi`, `mod_proxy`, `curl`,
   `websocket-client`;
-- при отсутствии делает `opkg update` и `opkg install`; `websocket-client`
-  в Entware отсутствует, поэтому после неудачного `opkg` пробуется
-  `python3 -m pip install websocket-client`;
+- при отсутствии остальных пакетов делает `opkg update` и `opkg install`;
+  `websocket-client` ставится только через `pip`: opkg-пакета
+  `python3-websocket-client` в Entware нет, поэтому `opkg` для него не
+  вызывается, а сразу пробуется `python3 -m pip install websocket-client`;
+- если модуль поставить не удалось — предупреждение, проверка продолжается;
 - проверяет Luna, IPC `9875`, `amixer`, `wpa_cli` и свободное место
   на `/` и `/data` (минимум ~20 МБ на каждом);
-- `MYPULT_NO_PACKAGES=1` — только отчёт без установки пакетов и без `pip`.
+- `MYPULT_NO_PACKAGES=1` — только отчёт: `opkg` и `pip` не запускаются,
+  отсутствие `websocket-client` не считается ошибкой.
 
 Установщик вызывает его автоматически до копирования файлов.
 

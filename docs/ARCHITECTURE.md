@@ -336,8 +336,11 @@ CGI запускаются от root: иначе недоступны sysfs, `am
    `deploy/preflight.sh`: модель `/proc/device-tree/model` (Cucumber/Midi),
    root, Entware, `opkg`, пакеты (`python3`, `lighttpd`, `mod_cgi`,
    `mod_proxy`, `curl`), Luna, IPC, свободное место на `/` и `/data`;
-   недостающие пакеты ставит через `opkg`, а `websocket-client` — через
-   `python3 -m pip install`, если в Entware пакета нет;
+   недостающие пакеты ставит через `opkg`, а `websocket-client` — сразу через
+   `python3 -m pip install`: opkg-пакета `python3-websocket-client` в Entware
+   нет, поэтому `opkg` для него не вызывается; при `MYPULT_NO_PACKAGES=1`
+   preflight ничего не устанавливает, отсутствие модуля — только
+   предупреждение;
 2. копирует `index.html`, `index.py`, `manifest.json`, `favicon.ico`,
    `icon-192.png`, `icon-512.png`, `icon.png`, CGI, конфиг, init и демоны;
 3. проверяет `lighttpd -t`;
@@ -359,7 +362,7 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 
 ## 9. Тесты
 
-- `tests/static_checks.py` — 116 проверок: структура HTML, дубликаты id,
+- `tests/static_checks.py` — 118 проверок: структура HTML, дубликаты id,
   версия/CHANGELOG, кодировка и переводы строк (одна проверка про CRLF
   известна и не блокирует), кеш моделей в UI «Нейросеть»;
 - `tests/test_units.py` — 178 проверок чистой логики;

@@ -85,18 +85,15 @@ fi
 [ -x /opt/bin/curl ] || ensure_pkg curl "HTTP-запросы"
 
 # websocket-client нужен плееру/Glagol. В Entware отдельного пакета нет,
-# поэтому после opkg пробуем pip.
+# поэтому сразу пробуем pip (opkg-попытка только шумела и ломала NO_PACKAGES).
 if [ -x /opt/bin/python3 ] && ! /opt/bin/python3 -c 'import websocket' >/dev/null 2>&1; then
-    ensure_pkg python3-websocket-client "WebSocket Glagol" || true
-    if ! /opt/bin/python3 -c 'import websocket' >/dev/null 2>&1; then
-        if [ "$NO_PACKAGES" != "1" ] && /opt/bin/python3 -m pip --version >/dev/null 2>&1; then
-            say "ставлю websocket-client через pip"
-            /opt/bin/python3 -m pip install --no-cache-dir websocket-client >>"$LOG" 2>&1 || \
-                warn "pip не смог поставить websocket-client"
-        fi
+    if [ "$NO_PACKAGES" != "1" ] && /opt/bin/python3 -m pip --version >/dev/null 2>&1; then
+        say "ставлю websocket-client через pip"
+        /opt/bin/python3 -m pip install --no-cache-dir websocket-client >>"$LOG" 2>&1 || \
+            warn "pip не смог поставить websocket-client"
     fi
     /opt/bin/python3 -c 'import websocket' >/dev/null 2>&1 || \
-        warn "плеер может не работать без python3-websocket-client"
+        warn "плеер может не работать: python3 -m pip install websocket-client"
 fi
 
 # Не обязательные для запуска, но нужны функциям

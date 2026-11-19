@@ -247,10 +247,14 @@ def test_version():
     install = read(os.path.join(ROOT, "deploy", "install.sh"))
     check("install.sh копирует version.json", "version.json" in install)
     check("install.sh создаёт веб-рут", 'mkdir -p "$WEB"' in install)
+    check("install.sh уважает MYPULT_NO_PACKAGES",
+          '${MYPULT_NO_PACKAGES:-0}' in install)
     preflight = read(os.path.join(ROOT, "deploy", "preflight.sh"))
     check("preflight проверяет /data", 'df -k "$mount"' in preflight and "for mount in / /data" in preflight)
     check("preflight ставит websocket через pip",
           "pip install" in preflight and "websocket-client" in preflight)
+    check("preflight не ставит несуществующий opkg-пакет",
+          "ensure_pkg python3-websocket-client" not in preflight)
 
 
 def test_sound_rows_mobile():
