@@ -496,6 +496,10 @@ def test_llm_ui_cache():
           "el.llmBase.addEventListener('change'" in html)
     check("LLM UI: audio/realtime отфильтрованы",
           "audio|realtime" in html and "MODEL_BLOCK" in html)
+    check("LLM UI: сессии и история чата",
+          'id="llmSessions"' in html and 'id="llmHistory"' in html
+          and "function renderLlmChats" in html
+          and "function renderLlmHistory" in html)
 
 
 def test_uninstall_safety():

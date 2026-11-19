@@ -380,6 +380,14 @@ main.grid{
 .chat-actions{display:flex;align-items:center;gap:var(--gap-xs);margin-left:auto;min-width:0;flex:0 0 auto}
 .chat-bar .btn.icon-sm{font-size:var(--fs-15);line-height:1}
 .chat-bar .btn{touch-action:manipulation}
+.chat-sessions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chat-sessions .chip{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-history{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow:auto;margin-top:12px;padding:8px;border:1px solid var(--stroke);border-radius:var(--r12);background:rgba(0,0,0,.12)}
+.chat-msg{max-width:88%;padding:8px 10px;border-radius:12px;white-space:pre-wrap;word-break:break-word;font-size:var(--fs-13);line-height:1.45}
+.chat-msg .who{display:block;font-size:10px;opacity:.6;margin-bottom:2px}
+.chat-msg.user{align-self:flex-end;background:rgba(124,92,255,.18)}
+.chat-msg.assistant{align-self:flex-start;background:rgba(255,255,255,.06)}
+.chat-history .seg-note{padding:8px}
 .btn.icon{padding:0;width:52px;height:52px;border-radius:50%;flex:0 0 auto}
 .btn.icon.big{width:64px;height:64px}
 .btn.icon.big svg{width:26px;height:26px}
@@ -1111,6 +1119,8 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       </div>
     </div>
 
+    <div class="chat-sessions" id="llmSessions" role="group" aria-label="Сессии нейросети"></div>
+
     <div class="row" style="margin-top:8px">
       <label class="llm-field" style="flex:1"><span>Длина ответа</span>
         <select id="llmLength">
@@ -1164,6 +1174,9 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     <div class="row between" style="margin-top:6px">
       <span class="seg-note" id="llmErrorsStatus">Сообщения провайдера</span>
       <button class="btn sm ghost" id="btnLlmErrors">Сохранить сообщения</button>
+    </div>
+    <div class="chat-history" id="llmHistory">
+      <div class="seg-note">История чата появится здесь.</div>
     </div>
     <div class="field" style="margin-top:12px">
       <textarea id="llmPrompt" placeholder="Спросите что-нибудь… Текстовые вопросы работают без голосового тумблера."></textarea>
@@ -3265,6 +3278,63 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     fillModels('');
   }
 
+  function renderLlmChats() {
+    if (!el.llmSessions) return;
+    var list = (State.llm && State.llm.chats) || [];
+    el.llmSessions.innerHTML = '';
+    list.forEach(function (chat) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chip chat-session';
+      button.dataset.id = chat.id;
+      button.setAttribute('aria-pressed', chat.id === State.llm.activeChat ? 'true' : 'false');
+      button.textContent = chat.name + (chat.messages ? ' · ' + chat.messages : '');
+      button.title = chat.name + (chat.messages ? ' · сообщений: ' + chat.messages : '');
+      button.addEventListener('click', function () { selectChat(chat.id); });
+      el.llmSessions.appendChild(button);
+    });
+    if (!list.length) {
+      el.llmSessions.innerHTML = '<span class="seg-note">сессий пока нет</span>';
+    }
+    renderLlmHistory();
+  }
+
+  function renderLlmHistory() {
+    if (!el.llmHistory) return;
+    var list = (State.llm && State.llm.chats) || [];
+    var active = null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === State.llm.activeChat) { active = list[i]; break; }
+    }
+    var history = (active && active.history) || [];
+    el.llmHistory.innerHTML = '';
+    if (!history.length) {
+      var empty = document.createElement('div');
+      empty.className = 'seg-note';
+      empty.textContent = 'История пуста — задайте первый вопрос.';
+      el.llmHistory.appendChild(empty);
+      return;
+    }
+    history.forEach(function (message) {
+      var row = document.createElement('div');
+      row.className = 'chat-msg ' + (message.role === 'user' ? 'user' : 'assistant');
+      var who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = message.role === 'user' ? 'Вы' : 'Нейросеть';
+      var text = document.createElement('span');
+      text.textContent = message.content;
+      row.appendChild(who);
+      row.appendChild(text);
+      el.llmHistory.appendChild(row);
+    });
+    el.llmHistory.scrollTop = el.llmHistory.scrollHeight;
+  }
+
+  function selectChat(id) {
+    if (!id || (State.llm && id === State.llm.activeChat)) return;
+    return switchChat({ chat_select: id });
+  }
+
   function renderProfileChips() {
     var list = (State.llm && State.llm.profiles) || [];
     el.llmProfiles.innerHTML = '';
@@ -3375,7 +3445,9 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       el.llmChat.title = chatName;
     }
     if (el.llmSystem) {
-      el.llmSystem.value = data.system_prompt || '';
+      if (el.llmSystem.dataset.dirty !== '1') {
+        el.llmSystem.value = data.system_prompt || '';
+      }
       el.llmSystemStatus.textContent = data.system_prompt ? 'Свой промпт' : 'Стандартный промпт';
     }
     if (el.llmErrors) {
@@ -3385,15 +3457,33 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       el.llmErrorsStatus.textContent = data.error_messages_custom ? 'Свои сообщения' : 'Сообщения провайдера';
     }
     applyProfile(findProfile(data.active));
+    renderLlmChats();
     updateLlmStatus();
     // Кастомный dropdown мог отрисоваться до ответа llm.py — синхронизируем
     // подпись с только что установленными значениями (длина ответа и т.п.).
     refreshDropdowns();
   }
 
+  function applyChatInfo(data) {
+    if (!State.llm) return;
+    State.llm.chats = (data && data.chats) || [];
+    State.llm.activeChat = (data && data.active_chat) || null;
+    if (el.llmChat) {
+      var name = (data && data.active_chat_name) || 'Чат 1';
+      el.llmChat.textContent = name;
+      el.llmChat.title = name;
+    }
+    renderLlmChats();
+  }
+
+  function refreshChats() {
+    return cgi('llm.py', { info: 1 }, { timeout: 8000, silent: true })
+      .then(applyChatInfo);
+  }
+
   function switchChat(payload) {
     return cgi('llm.py', payload, { timeout: 15000 }).then(function (data) {
-      applyLlmInfo(data);
+      applyChatInfo(data);
       toast('Чат: ' + (data.active_chat_name || '—'), 'ok');
     }).catch(function (err) {
       toast('Чат: ' + err.message, 'bad');
@@ -3420,7 +3510,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     var name = (el.chatRenameInput.value || '').trim();
     if (!name) { el.chatRenameInput.focus(); return; }
     return cgi('llm.py', { chat_rename: active, chat_name: name }, { timeout: 10000 }).then(function (data) {
-      applyLlmInfo(data);
+      applyChatInfo(data);
       closeChatRename();
       toast('Чат переименован: ' + (data.active_chat_name || name), 'ok');
     }).catch(function (err) {
@@ -3439,6 +3529,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   function saveLlmSystem() {
     var value = el.llmSystem.value.trim();
     return cgi('llm.py', { system_prompt: value }, { timeout: 15000 }).then(function (data) {
+      if (el.llmSystem) delete el.llmSystem.dataset.dirty;
       applyLlmInfo(data);
       toast(value ? 'Промпт сохранён' : 'Вернул стандартный промпт', 'ok');
     }).catch(function (err) {
@@ -3508,12 +3599,17 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       el.llmAnswer.classList.add('empty');
       return cgi('llm.py', { prompt: prompt }, { timeout: 95000 }).then(function (data) {
         State.llmAnswer = data.answer || '';
-        el.llmAnswer.textContent = State.llmAnswer || '(пустой ответ)';
-        el.llmAnswer.classList.toggle('empty', !State.llmAnswer);
+        el.llmAnswer.textContent = '';
+        el.llmAnswer.classList.add('empty');
         el.btnLlmSay.disabled = !State.llmAnswer;
         var tokens = data.usage && data.usage.total_tokens
           ? ' · ' + data.usage.total_tokens + ' токенов' : '';
         el.llmMeta.textContent = [data.provider, data.model].filter(Boolean).join(' · ') + tokens;
+        return refreshChats().catch(function () {
+          el.llmAnswer.textContent = State.llmAnswer ||
+            '(ответ получен, но история не загрузилась)';
+          el.llmAnswer.classList.remove('empty');
+        });
       }).catch(function (err) {
         el.llmAnswer.textContent = 'Ошибка: ' + err.message;
         el.llmAnswer.classList.remove('empty');
@@ -6026,6 +6122,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
         el.llmErrors.dataset.dirty = '1';
       });
     }
+    if (el.llmSystem) {
+      el.llmSystem.addEventListener('input', function () {
+        el.llmSystem.dataset.dirty = '1';
+      });
+    }
     el.btnLlmAsk.addEventListener('click', askLlm);
     el.btnLlmSay.addEventListener('click', sayLlmAnswer);
     el.llmPrompt.addEventListener('keydown', function (ev) {
@@ -6307,7 +6408,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       'llmEnabled', 'llmStatus', 'btnLlmSave', 'llmPrompt', 'btnLlmAsk', 'btnLlmSay',
       'llmSystem', 'btnLlmSystem', 'llmSystemStatus',
       'llmErrors', 'btnLlmErrors', 'llmErrorsStatus',
-      'llmAnswer', 'llmMeta',
+      'llmAnswer', 'llmMeta', 'llmSessions', 'llmHistory',
       'vpnUrl', 'btnVpnSave', 'btnVpnToggle', 'vpnStatus', 'vpnServer', 'vpnLog', 'vpnAutostart',
       'btnVoiceDaemon', 'voiceDaemonStatus',
       'radioChips', 'btnRadioPrev', 'btnRadioStop', 'btnRadioNext', 'radioStatus',
