@@ -131,7 +131,7 @@ def fetch_release():
             "Accept": "application/vnd.github+json",
         },
     )
-    with urllib.request.urlopen(request, timeout=15) as response:
+    with common.open_url(request, timeout=15, guard=asset_guard) as response:
         data = json.loads(response.read().decode("utf-8"))
     items = data if isinstance(data, list) else [data]
     release = pick_panel_release(items)
@@ -280,7 +280,7 @@ def download(url, path, expected_sha=None):
     request = urllib.request.Request(url, headers={"User-Agent": "MidiPult-Updater/1.0"})
     digest = hashlib.sha256()
     total = 0
-    with urllib.request.urlopen(request, timeout=45) as response, open(path, "wb") as out:
+    with common.open_url(request, timeout=45, guard=asset_guard) as response, open(path, "wb") as out:
         while True:
             chunk = response.read(1024 * 256)
             if not chunk:
@@ -298,7 +298,7 @@ def download(url, path, expected_sha=None):
 def fetch_sha(url):
     url = asset_guard(url)
     request = urllib.request.Request(url, headers={"User-Agent": "MidiPult-Updater/1.0"})
-    with urllib.request.urlopen(request, timeout=15) as response:
+    with common.open_url(request, timeout=15, guard=asset_guard) as response:
         text = response.read(4096).decode("utf-8", "replace")
     match = re.search(r"\b([0-9a-fA-F]{64})\b", text)
     if not match:

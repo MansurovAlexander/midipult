@@ -329,9 +329,21 @@ def test_auth_guard():
 
 
 def test_url_guard():
+    import urllib.request
+
     def bad(url, **kwargs):
         try:
             common.url_guard(url, **kwargs)
+            return False
+        except ValueError:
+            return True
+
+    def redirect_bad(target, **kwargs):
+        handler = common.GuardedRedirectHandler(
+            lambda url: common.url_guard(url, **kwargs))
+        request = urllib.request.Request("https://8.8.8.8/")
+        try:
+            handler.redirect_request(request, None, 302, "Found", {}, target)
             return False
         except ValueError:
             return True
@@ -352,6 +364,12 @@ def test_url_guard():
           bad("http://169.254.169.254", allow_http=True, allow_private=True,
               allow_loopback=True))
     check("ssrf: неверная схема запрещена", bad("ftp://8.8.8.8"))
+    check("ssrf: redirect в loopback запрещён",
+          redirect_bad("http://127.0.0.1/", allow_http=True,
+                       allow_private=True))
+    check("ssrf: redirect в метаданные запрещён",
+          redirect_bad("http://169.254.169.254/", allow_http=True,
+                       allow_private=True, allow_loopback=True))
 
 
 def test_update_assets():
@@ -670,12 +688,12 @@ def test_update_fetch_release():
                          "midipult-0.4.52.tar.gz.sha256")
     body = json.dumps([android, draft, panel]).encode("utf-8")
 
-    old_urlopen = update.urllib.request.urlopen
+    old_open = common.open_url
     try:
-        update.urllib.request.urlopen = lambda request, timeout=None: FakeResponse(body)
+        common.open_url = lambda request, timeout=None, **kwargs: FakeResponse(body)
         fetched = update.fetch_release()
     finally:
-        update.urllib.request.urlopen = old_urlopen
+        common.open_url = old_open
 
     check("update: fetch_release пропускает Android и draft",
           fetched["tag"] == "v0.4.52" and fetched["version"] == "0.4.52", str(fetched))

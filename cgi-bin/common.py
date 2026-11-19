@@ -501,6 +501,28 @@ def url_guard(url, allow_http=False, allow_private=False, allow_loopback=False):
     return raw
 
 
+class GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Проверять каждый redirect тем же guard, что и исходный URL."""
+
+    def __init__(self, guard):
+        self.guard = guard
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.guard(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def open_url(request, timeout=30, guard=None, **guard_kwargs):
+    """urlopen с проверкой redirect-адресов.
+
+    guard(url) должен бросить ValueError для запрещённого адреса. По умолчанию
+    используется url_guard с переданными allow_http/allow_private/allow_loopback.
+    """
+    check = guard or (lambda url: url_guard(url, **guard_kwargs))
+    opener = urllib.request.build_opener(GuardedRedirectHandler(check))
+    return opener.open(request, timeout=timeout)
+
+
 # --------------------------------------------------------------------------- #
 #  Процессы
 # --------------------------------------------------------------------------- #

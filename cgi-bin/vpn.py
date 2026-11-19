@@ -82,7 +82,8 @@ def mask_url(url):
 def fetch(url, timeout=20):
     url = common.url_guard(url, allow_http=False, allow_private=False, allow_loopback=False)
     request = urllib.request.Request(url, headers={"User-Agent": "mypult/1.0"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with common.open_url(request, timeout=timeout, allow_http=False,
+                         allow_private=False, allow_loopback=False) as response:
         raw = response.read(2_000_000)
     return raw.decode("utf-8", "replace")
 
