@@ -395,9 +395,13 @@ CGI запускаются от root: иначе недоступны sysfs, `am
    зато конфиг применяется);
 6. проверяет, что панель и CGI отвечают.
 
-`deploy/push-to-station.ps1` находит колонку, считает хэш, поднимает патч-версию,
-шлёт tar по SSH и запускает install. Флаги: `-Station`, `-NoBump`, `-NoInstall`,
-`-NoScan`, `-Message`.
+`deploy/push-to-station.ps1` задуман так: находит колонку, считает хэш,
+поднимает патч-версию, шлёт tar по SSH и запускает install; флаги `-Station`,
+`-NoBump`, `-NoInstall`, `-NoScan`, `-Message`. В текущем состоянии файл
+повреждён (смешанная кодировка UTF-16LE/UTF-8) и PowerShell его не
+выполняет; `push.cmd` вызывает тот же скрипт. Это pre-existing дефект,
+исправление — отдельной задачей; до неё установка идёт через
+`deploy/install.sh` на колонке.
 
 `deploy/uninstall.sh` останавливает только процессы пульта, делает бэкап в
 `/data/mypult-uninstall-<дата>`, удаляет `/data/myweb`, init-скрипты и
