@@ -5,7 +5,7 @@
 развивался итерациями `0.0.x`; полная история — в
 [docs/CHANGELOG-dev.md](docs/CHANGELOG-dev.md).
 
-## Не выпущено
+## 0.4.69 — 2026-11-19
 
 - Голос: `should_silence()` больше не переключает профиль — проверка идёт через
   `llm_switch(text, dry_run=True)`; профиль/чат активируется один раз в
@@ -110,10 +110,12 @@
   `voice_daemon.py`, `state_daemon.py` и `myweb.conf`. При несовпадении
   пишет «pid N не похож на … — не трогаю» и удаляет pid-файл; `--dry-run`
   не посылает сигналов и ничего не удаляет.
+- LLM: `User-Agent` собирается из `version.json`, а не из зашитой строки
+  `0.4.68`.
 - Тесты: `static_checks` больше не имеет известного CRLF-провала — CRLF
   запрещён везде, кроме `.ps1`/`.cmd` (для них в `.gitattributes` задано
   `eol=crlf`), BOM допустим только у `.ps1`, а `TEXT_EXT` включает `.yml` и
-  `.cmd`. Счётчики: 191 `test_units`, 121 `static_checks`, 42 `run_cgi`.
+  `.cmd`. Счётчики: 192 `test_units`, 121 `static_checks`, 42 `run_cgi`.
 - CI: добавлен GitHub Actions (`.github/workflows/ci.yml`) — push в `main` и
   pull_request, Ubuntu, Python 3.12, Node 24, `permissions: contents: read`,
   отмена устаревшего прогона, таймаут 15 минут. Шаги: `compileall` и

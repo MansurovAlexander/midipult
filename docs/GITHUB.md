@@ -58,7 +58,7 @@ git push -u origin main
 - синтаксис Python — `compileall` для `cgi-bin`, `service`, `tests` и
   `py_compile index.py`;
 - синтаксис shell — `sh -n` для всех `deploy/*.sh` и `init.d/S99mypult`;
-- тесты — `tests/test_units.py` (191), `tests/static_checks.py` (121) и
+- тесты — `tests/test_units.py` (192), `tests/static_checks.py` (121) и
   `tests/run_cgi_tests.py` (42).
 
 Условия прогона: Ubuntu, Python 3.12, Node 24, права `contents: read`,

@@ -447,7 +447,7 @@ pull_request на Ubuntu с Python 3.12 прогоняются синтакси�
 Локально те же тесты запускаются на колонке (или на машине с Python 3):
 
 ```sh
-python tests/test_units.py       # 191 проверка
+python tests/test_units.py       # 192 проверки
 python tests/static_checks.py    # 121 проверка
 python tests/run_cgi_tests.py    # 42 проверки
 ```

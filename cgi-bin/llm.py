@@ -28,7 +28,17 @@ CONFIG_DIR = "/data/mypult"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "llm.json")
 CHATS_PATH = os.path.join(CONFIG_DIR, "chats.json")
 
-USER_AGENT = "MidiPult/0.4.68"
+def _project_version():
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "version.json")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return str(json.load(fh).get("version") or "").strip()
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+USER_AGENT = "MidiPult/" + (_project_version() or "0.0.0")
 MAX_RESPONSE = 2 * 1024 * 1024
 
 
