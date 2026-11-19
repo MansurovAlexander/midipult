@@ -251,6 +251,8 @@ def test_version():
     check("preflight проверяет /data", 'df -k "$mount"' in preflight and "for mount in / /data" in preflight)
     check("preflight ставит websocket через pip",
           "pip install" in preflight and "websocket-client" in preflight)
+    check("preflight не ставит несуществующий opkg-пакет",
+          "ensure_pkg python3-websocket-client" not in preflight)
 
 
 def test_sound_rows_mobile():
