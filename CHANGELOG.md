@@ -112,10 +112,9 @@
   не посылает сигналов и ничего не удаляет.
 - LLM: `User-Agent` собирается из `version.json`, а не из зашитой строки
   `0.4.68`.
-- Известное ограничение: `deploy/push-to-station.ps1` повреждён (смешанная
-  кодировка UTF-16LE/UTF-8), PowerShell его не выполняет; `push.cmd` вызывает
-  тот же файл. До отдельного исправления — установка с архива на колонке или
-  `git`/`scp` + `sh deploy/install.sh`.
+- Заливка: `deploy/push-to-station.ps1` перекодирован в UTF-8 с BOM и CRLF;
+  `.gitattributes` больше не портит файл при checkout. `static_checks`
+  проверяет для `.ps1` UTF-8, отсутствие NUL и BOM при не-ASCII.
 - Тесты: `static_checks` больше не имеет известного CRLF-провала — CRLF
   запрещён везде, кроме `.ps1`/`.cmd` (для них в `.gitattributes` задано
   `eol=crlf`), BOM допустим только у `.ps1`, а `TEXT_EXT` включает `.yml` и

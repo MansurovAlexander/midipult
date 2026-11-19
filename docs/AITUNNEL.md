@@ -251,10 +251,7 @@ POST /cgi-bin/llm.py
    вызывается.
    Создавать `/data/myweb` вручную не нужно.
 
-   С Windows скрипт `deploy/push-to-station.ps1` сейчас **не работает**:
-   файл повреждён (смешанная кодировка UTF-16LE/UTF-8), `deploy/push.cmd`
-   вызывает его же. Используйте установку с архивом на самой колонке, как
-   выше, либо `git`/`scp` и `sh deploy/install.sh` по SSH.
+   С Windows удобнее `deploy/push-to-station.ps1 -Station <IP>`.
 
 ## Настройка профиля AITUNNEL
 

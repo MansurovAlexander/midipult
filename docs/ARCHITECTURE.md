@@ -395,13 +395,9 @@ CGI запускаются от root: иначе недоступны sysfs, `am
    зато конфиг применяется);
 6. проверяет, что панель и CGI отвечают.
 
-`deploy/push-to-station.ps1` задуман так: находит колонку, считает хэш,
-поднимает патч-версию, шлёт tar по SSH и запускает install; флаги `-Station`,
-`-NoBump`, `-NoInstall`, `-NoScan`, `-Message`. В текущем состоянии файл
-повреждён (смешанная кодировка UTF-16LE/UTF-8) и PowerShell его не
-выполняет; `push.cmd` вызывает тот же скрипт. Это pre-existing дефект,
-исправление — отдельной задачей; до неё установка идёт через
-`deploy/install.sh` на колонке.
+`deploy/push-to-station.ps1` находит колонку, считает хэш, поднимает патч-версию,
+шлёт tar по SSH и запускает install. Флаги: `-Station`, `-NoBump`, `-NoInstall`,
+`-NoScan`, `-Message`.
 
 `deploy/uninstall.sh` останавливает только процессы пульта, делает бэкап в
 `/data/mypult-uninstall-<дата>`, удаляет `/data/myweb`, init-скрипты и
@@ -426,7 +422,10 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 
 - `tests/static_checks.py` — 121 проверка: структура HTML, дубликаты id,
   версия/CHANGELOG, кодировка и переводы строк (CRLF запрещён везде, кроме
-  `.ps1`/`.cmd`, где он задан в `.gitattributes`; BOM — только у `.ps1`),
+  `.ps1`/`.cmd`, где он задан в `.gitattributes`; BOM разрешён только у
+  `.ps1` и обязателен, если в нём есть не-ASCII; у `.ps1` дополнительно
+  проверяются UTF-8-декодируемость и отсутствие NUL — так ловится
+  UTF-16LE-блоб, который ломал `deploy/push-to-station.ps1`),
   кеш моделей в UI «Нейросеть»; отдельно
   проверяется, что в `vpn.py` есть `PINNED_SHA256`, а распаковка `sing-box`
   идёт без `sh`/`gzip -dc` — через `tarfile` с `filter="data"`,
