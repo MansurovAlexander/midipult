@@ -1287,6 +1287,363 @@ def test_llm_info_active_history():
         llm.load_chats = old_chats
 
 
+def test_voice_recognize_query():
+    import time
+
+    calls = []
+    old_post = voice_daemon.post
+    try:
+        voice_daemon.post = lambda url, payload, timeout=60: calls.append(url) or {
+            "transcript": "продолжение"}
+        text = voice_daemon.recognize(timeout=3, empty_on_timeout=True)
+        check("голос: recognize запускает прослушку",
+              "timeout_ms=3000" in calls[0]
+              and "empty_on_timeout=true" in calls[0], str(calls))
+        check("голос: recognize возвращает transcript", text == "продолжение", text)
+
+        calls[:] = []
+        voice_daemon.post = lambda url, payload, timeout=60: calls.append(url) or {}
+        check("голос: recognize 204 -> пусто",
+              voice_daemon.recognize(timeout=1, empty_on_timeout=True) == "",
+              str(calls))
+
+        calls[:] = []
+        voice_daemon.post = lambda url, payload, timeout=60: calls.append(url) or {}
+        voice_daemon.recognize(timeout=0)
+        check("голос: recognize клампит таймаут снизу",
+              "timeout_ms=1000" in calls[0], str(calls))
+        calls[:] = []
+        voice_daemon.recognize(timeout=100)
+        check("голос: recognize клампит таймаут сверху",
+              "timeout_ms=60000" in calls[0], str(calls))
+
+        def boom(url, payload, timeout=60):
+            raise RuntimeError("boom")
+
+        voice_daemon.post = boom
+        check("голос: ошибка recognize -> пусто",
+              voice_daemon.recognize(timeout=2, empty_on_timeout=True) == "")
+    finally:
+        voice_daemon.post = old_post
+
+    old_recent = list(voice_daemon._RECENT)
+    try:
+        voice_daemon._RECENT[:] = []
+        voice_daemon._remember_phrase("проверка")
+        check("голос: недавняя фраза дедуплицируется",
+              voice_daemon._is_recent_phrase("проверка") is True)
+        voice_daemon._RECENT[:] = [("проверка", time.time() - 31)]
+        check("голос: старая фраза не дедуплицируется",
+              voice_daemon._is_recent_phrase("проверка") is False)
+        voice_daemon._RECENT[:] = []
+        voice_daemon._remember_phrase("первая")
+        voice_daemon._remember_phrase("вторая")
+        check("голос: дедуп помнит несколько фраз",
+              voice_daemon._is_recent_phrase("первая")
+              and voice_daemon._is_recent_phrase("вторая"))
+    finally:
+        voice_daemon._RECENT[:] = old_recent
+
+
+def test_voice_sound_files():
+    import tempfile
+
+    base = tempfile.mkdtemp(prefix="mypult-snd-")
+    data_root = os.path.join(base, "data")
+    system_root = os.path.join(base, "system")
+    os.makedirs(data_root)
+    os.makedirs(system_root)
+    old_roots = voice_daemon.SOUND_ROOTS
+    old_run = voice_daemon.subprocess.run
+    old_cue = voice_daemon.FOLLOW_UP_CUE
+    try:
+        voice_daemon.SOUND_ROOTS = (data_root, system_root)
+        system_file = os.path.join(system_root, "spotter_start.mp3")
+        data_file = os.path.join(data_root, "spotter_start.mp3")
+        with open(system_file, "wb") as fh:
+            fh.write(b"ID3system")
+        check("голос: звук найден в /system",
+              voice_daemon.sound_path("spotter_start") == system_file,
+              voice_daemon.sound_path("spotter_start"))
+        with open(data_file, "wb") as fh:
+            fh.write(b"ID3data")
+        check("голос: замена в /data важнее /system",
+              voice_daemon.sound_path("spotter_start") == data_file,
+              voice_daemon.sound_path("spotter_start"))
+        check("голос: неизвестный звук не найден",
+              voice_daemon.sound_path("нет-такого") == "")
+
+        calls = []
+
+        class FakeProc:
+            returncode = 0
+            stderr = b""
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return FakeProc()
+
+        voice_daemon.subprocess.run = fake_run
+        voice_daemon.FOLLOW_UP_CUE = True
+        check("голос: звук играется через GStreamer",
+              voice_daemon.play_sound("spotter_start") is True)
+        check("голос: pipeline указывает на текущий файл",
+              bool(calls) and "spotter_start.mp3" in calls[0][0][-1]
+              and calls[0][0][0].endswith("maind"),
+              str(calls[0][0]) if calls else "")
+        voice_daemon.FOLLOW_UP_CUE = False
+        check("голос: cue можно отключить",
+              voice_daemon.play_sound("spotter_start") is False
+              and len(calls) == 1, str(calls))
+    finally:
+        voice_daemon.SOUND_ROOTS = old_roots
+        voice_daemon.subprocess.run = old_run
+        voice_daemon.FOLLOW_UP_CUE = old_cue
+        for root in (data_root, system_root):
+            for name in os.listdir(root):
+                os.remove(os.path.join(root, name))
+            os.rmdir(root)
+        os.rmdir(base)
+
+
+def test_voice_follow_up():
+    import time
+
+    saved = (
+        voice_daemon.FOLLOW_UP_SECONDS,
+        voice_daemon.FOLLOW_UP_TURNS,
+        voice_daemon.FOLLOW_UP_TOTAL,
+        voice_daemon._LAST_LLM_AT,
+        list(voice_daemon._RECENT),
+    )
+    old_recognize = voice_daemon.recognize
+    old_handle = voice_daemon.handle
+    old_cue = voice_daemon.play_listen_cue
+    old_cancel = voice_daemon.play_cancel_cue
+    old_busy = voice_daemon.native_alice_busy
+    try:
+        voice_daemon.FOLLOW_UP_SECONDS = 1
+        voice_daemon.FOLLOW_UP_TURNS = 2
+        voice_daemon.FOLLOW_UP_TOTAL = 5
+        voice_daemon.native_alice_busy = lambda: False
+        cues = []
+        cancels = []
+        voice_daemon.play_listen_cue = lambda: cues.append(time.time())
+        voice_daemon.play_cancel_cue = lambda: cancels.append(time.time())
+
+        heard = []
+        phrases = ["второй вопрос", "третий вопрос"]
+
+        def fake_recognize(timeout=60, empty_on_timeout=False):
+            heard.append((timeout, empty_on_timeout))
+            return phrases.pop(0) if phrases else ""
+
+        def fake_handle(text):
+            voice_daemon._LAST_LLM_AT = time.time()
+
+        voice_daemon.recognize = fake_recognize
+        voice_daemon.handle = fake_handle
+        voice_daemon._RECENT[:] = []
+        voice_daemon.follow_up()
+        check("голос: follow-up не превышает лимит ходов",
+              len(heard) == 2, str(heard))
+        check("голос: follow-up слушает с empty_on_timeout",
+              all(item[1] is True and abs(item[0] - 1.0) <= 0.05 for item in heard),
+              str(heard))
+        check("голос: earcon перед каждым окном",
+              len(cues) == 2, str(cues))
+        check("голос: после речи нет звука отмены",
+              cancels == [], str(cancels))
+        check("голос: follow-up помнит последнюю фразу",
+              voice_daemon._is_recent_phrase("третий вопрос") is True)
+
+        heard[:] = []
+        cues[:] = []
+        voice_daemon._remember_phrase("уже было")
+        voice_daemon.recognize = lambda timeout=60, empty_on_timeout=False: (
+            heard.append(timeout) or "уже было")
+        voice_daemon.follow_up()
+        check("голос: повтор фразы закрывает окно",
+              len(heard) == 1, str(heard))
+        check("голос: повтор не играет отмену",
+              cancels == [], str(cancels))
+
+        heard[:] = []
+        cancels[:] = []
+        voice_daemon._RECENT[:] = []
+        voice_daemon.recognize = lambda timeout=60, empty_on_timeout=False: (
+            heard.append(timeout) or "")
+        voice_daemon.follow_up()
+        check("голос: тишина играет spotter_cancel",
+              len(cancels) == 1, "%s/%s" % (heard, cancels))
+
+        heard[:] = []
+        cancels[:] = []
+        voice_daemon._RECENT[:] = []
+        voice_daemon.recognize = lambda timeout=60, empty_on_timeout=False: (
+            heard.append(timeout) or "выключи впн")
+        voice_daemon.handle = lambda text: None
+        voice_daemon.follow_up()
+        check("голос: команда закрывает окно продолжения",
+              len(heard) == 1, str(heard))
+
+        heard[:] = []
+        cues[:] = []
+        voice_daemon.native_alice_busy = lambda: True
+        voice_daemon.follow_up()
+        check("голос: занятая Алиса не открывает окно",
+              heard == [] and cues == [], "%s/%s" % (heard, cues))
+
+        heard[:] = []
+        voice_daemon.native_alice_busy = lambda: False
+        voice_daemon.FOLLOW_UP_TURNS = 0
+        voice_daemon.follow_up()
+        check("голос: нулевые ходы отключают окно", heard == [], str(heard))
+    finally:
+        voice_daemon.recognize = old_recognize
+        voice_daemon.handle = old_handle
+        voice_daemon.play_listen_cue = old_cue
+        voice_daemon.play_cancel_cue = old_cancel
+        voice_daemon.native_alice_busy = old_busy
+        (voice_daemon.FOLLOW_UP_SECONDS,
+         voice_daemon.FOLLOW_UP_TURNS,
+         voice_daemon.FOLLOW_UP_TOTAL,
+         voice_daemon._LAST_LLM_AT,
+         recent) = saved
+        voice_daemon._RECENT[:] = recent
+
+
+def test_voice_env_clamps():
+    keys = ("MYPULT_TEST_INT", "MYPULT_TEST_FLOAT", "MYPULT_TEST_NAN",
+            "MYPULT_TEST_NEG")
+    try:
+        os.environ["MYPULT_TEST_INT"] = "3.0"
+        os.environ["MYPULT_TEST_FLOAT"] = "2.5"
+        os.environ["MYPULT_TEST_NAN"] = "nan"
+        os.environ["MYPULT_TEST_NEG"] = "-5"
+        check("голос: env int из '3.0'",
+              voice_daemon._env_int("MYPULT_TEST_INT", 1, 0, 10) == 3)
+        check("голос: env float читается",
+              voice_daemon._env_float("MYPULT_TEST_FLOAT", 1, 0, 10) == 2.5)
+        check("голос: env nan -> default",
+              voice_daemon._env_float("MYPULT_TEST_NAN", 8, 1, 30) == 8)
+        check("голос: env ниже минимума клампится",
+              voice_daemon._env_float("MYPULT_TEST_NEG", 8, 1, 30) == 1)
+        check("голос: отсутствующий env -> default",
+              voice_daemon._env_int("MYPULT_TEST_MISSING", 3, 0, 10) == 3)
+    finally:
+        for key in keys:
+            os.environ.pop(key, None)
+
+
+def test_voice_speaker_idle():
+    import tempfile
+    import time
+
+    base = tempfile.mkdtemp(prefix="mypult-pcm-")
+    sub = os.path.join(base, "card0", "pcm0p", "sub0")
+    os.makedirs(sub)
+    status = os.path.join(sub, "status")
+    old_glob = voice_daemon.PCM_STATUS_GLOB
+    old_running = voice_daemon.speaker_running
+    try:
+        voice_daemon.PCM_STATUS_GLOB = os.path.join(
+            base, "card*", "pcm*p", "sub*", "status")
+        with open(status, "w", encoding="utf-8") as fh:
+            fh.write("state: RUNNING\n")
+        check("голос: PCM RUNNING — динамик занят",
+              voice_daemon.speaker_running() is True)
+        with open(status, "w", encoding="utf-8") as fh:
+            fh.write("state: PREPARED\n")
+        check("голос: PCM PREPARED — тишина",
+              voice_daemon.speaker_running() is False)
+
+        counter = {"n": 0}
+
+        def fake_running():
+            counter["n"] += 1
+            return counter["n"] <= 2
+
+        voice_daemon.speaker_running = fake_running
+        started = time.time()
+        waited = voice_daemon.wait_speaker_idle(
+            expected=0.2, settle=0.1, limit=5)
+        check("голос: конец озвучки определяется по PCM",
+              waited == voice_daemon.SPEAKER_IDLE and time.time() - started >= 0.1,
+              "%s/%.2f" % (waited, time.time() - started))
+
+        voice_daemon.speaker_running = lambda: False
+        started = time.time()
+        result = voice_daemon.wait_speaker_idle(
+            start_timeout=0.1, settle=0.05, limit=5)
+        check("голос: без звука не ждём до лимита",
+              result == voice_daemon.SPEAKER_UNKNOWN
+              and time.time() - started < 2.0,
+              "%s/%.2f" % (result, time.time() - started))
+
+        voice_daemon.speaker_running = lambda: True
+        started = time.time()
+        result = voice_daemon.wait_speaker_idle(
+            expected=0.1, overrun=0.1, settle=0.05, limit=30)
+        check("голос: чужой звук не блокирует пульт",
+              result == voice_daemon.SPEAKER_FOREIGN
+              and time.time() - started < 3.0,
+              "%s/%.2f" % (result, time.time() - started))
+    finally:
+        voice_daemon.PCM_STATUS_GLOB = old_glob
+        voice_daemon.speaker_running = old_running
+        for name in ("status",):
+            try:
+                os.remove(os.path.join(sub, name))
+            except OSError:
+                pass
+        for path in (sub, os.path.dirname(sub), os.path.dirname(os.path.dirname(sub)),
+                     base):
+            try:
+                os.rmdir(path)
+            except OSError:
+                pass
+
+
+def test_voice_say_waits():
+    import time
+
+    old_post = voice_daemon.post
+    old_wait = voice_daemon.wait_speaker_idle
+    try:
+        posts = []
+        voice_daemon.post = lambda url, payload, timeout=60: posts.append(
+            (url, payload)) or {}
+        seen = []
+
+        def fake_wait(expected=0.0, start_timeout=6.0, settle=0.5, limit=180.0,
+                      overrun=5.0):
+            seen.append((expected, start_timeout, limit))
+            return voice_daemon.SPEAKER_FOREIGN
+
+        voice_daemon.wait_speaker_idle = fake_wait
+        voice_daemon.say("короткая фраза")
+        check("голос: say ждёт конец озвучки",
+              bool(seen) and seen[0][0] > 0 and seen[0][2] > seen[0][0],
+              str(seen))
+        check("голос: say шлёт speak.py",
+              any("speak.py" in url for url, _ in posts), str(posts))
+
+        def unknown(expected=0.0, start_timeout=6.0, settle=0.5, limit=180.0,
+                    overrun=5.0):
+            return voice_daemon.SPEAKER_UNKNOWN
+
+        voice_daemon.wait_speaker_idle = unknown
+        started = time.time()
+        voice_daemon.say("да")
+        elapsed = time.time() - started
+        check("голос: без /proc/asound say ждёт по оценке",
+              elapsed >= 0.8, "%.2f" % elapsed)
+    finally:
+        voice_daemon.post = old_post
+        voice_daemon.wait_speaker_idle = old_wait
+
+
 def main():
     for test in (
         test_generic_helpers,
@@ -1319,6 +1676,12 @@ def main():
         test_llm_profile_id,
         test_voice_chat_commands,
         test_voice_chat_actions,
+        test_voice_recognize_query,
+        test_voice_sound_files,
+        test_voice_follow_up,
+        test_voice_env_clamps,
+        test_voice_speaker_idle,
+        test_voice_say_waits,
         test_voice_routing_guards,
         test_voice_switch_dry_run,
     ):

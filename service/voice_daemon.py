@@ -12,10 +12,12 @@
 
 from __future__ import annotations
 
+import glob
 import http.client
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -99,6 +101,114 @@ def chunk_text(text, limit=1700):
     return chunks
 
 
+PCM_STATUS_GLOB = "/proc/asound/card*/pcm*p/sub*/status"
+PCM_RUNNING_STATES = ("RUNNING", "DRAINING")
+QUASAR_ROOT = "/system/vendor/quasar"
+MAIND = QUASAR_ROOT + "/maind"
+SOUND_ROOTS = ("/data/quasar/data/sounds/common",
+               QUASAR_ROOT + "/sounds/common")
+SOUND_EXTS = (".mp3", ".opus", ".wav")
+
+# Итоги wait_speaker_idle: дождались тишины / звук не начался / динамик занят
+# чем-то другим дольше ожидаемой длительности нашей речи.
+SPEAKER_IDLE = "idle"
+SPEAKER_UNKNOWN = "unknown"
+SPEAKER_FOREIGN = "foreign"
+
+
+def speaker_running():
+    """Играет ли сейчас что-то в динамике (ALSA PCM в состоянии RUNNING)."""
+    for path in glob.glob(PCM_STATUS_GLOB):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("state:"):
+                        if line.split(":", 1)[1].strip() in PCM_RUNNING_STATES:
+                            return True
+                        break
+        except OSError:
+            continue
+    return False
+
+
+def wait_speaker_idle(expected=0.0, start_timeout=6.0, settle=0.5, limit=180.0,
+                      overrun=5.0):
+    """Дождаться фактического конца озвучки по состоянию ALSA PCM.
+
+    aliced не присылает TTS_STARTED/TTS_COMPLETED (проверено на Станции Миди),
+    поэтому конец речи определяем по /proc/asound: пока PCM RUNNING — динамик
+    занят. Бюджет ожидания не зависит от внешних сервисов: если PCM занят
+    дольше `expected + overrun`, это чужая речь/музыка/BT, и мы не ждём её
+    (SPEAKER_FOREIGN). Если звук не начался за start_timeout — SPEAKER_UNKNOWN,
+    вызывающий сам решает, добирать ли время оценкой по длине текста.
+    """
+    started_at = time.time()
+    deadline = started_at + limit
+    seen = False
+    quiet_since = None
+    running_since = None
+    while time.time() < deadline:
+        if speaker_running():
+            if not seen:
+                seen = True
+                running_since = time.time()
+            quiet_since = None
+            if expected and time.time() - running_since > expected + overrun:
+                return SPEAKER_FOREIGN
+        elif seen:
+            if quiet_since is None:
+                quiet_since = time.time()
+            elif time.time() - quiet_since >= settle:
+                return SPEAKER_IDLE
+        elif time.time() - started_at > start_timeout:
+            return SPEAKER_UNKNOWN
+        time.sleep(0.12)
+    return SPEAKER_FOREIGN if seen else SPEAKER_UNKNOWN
+
+
+def sound_path(name):
+    """Текущий файл штатного звука: сначала замены в /data, потом /system."""
+    for root in SOUND_ROOTS:
+        for ext in SOUND_EXTS:
+            path = os.path.join(root, name + ext)
+            if os.path.isfile(path):
+                return path
+    return ""
+
+
+def play_sound(name, timeout=15):
+    """Проиграть штатный звук станции через GStreamer (mp3/opus/wav).
+
+    Файл читается при каждом вызове, поэтому замена через панель «Звуки»
+    (cgi-bin/sounds.py) подхватывается без перезапуска демона. maind
+    --gst-launch — тот же путь, которым панель проигрывает превью.
+    """
+    if not FOLLOW_UP_CUE:
+        return False
+    path = sound_path(name)
+    if not path:
+        log("звук %s: файл не найден" % name)
+        return False
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = QUASAR_ROOT + ":libs"
+    try:
+        proc = subprocess.run(
+            [MAIND, "--gst-launch",
+             "filesrc location=%s ! decodebin ! audioconvert ! "
+             "audioresample ! alsasink" % path],
+            cwd=QUASAR_ROOT, env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            timeout=timeout, check=False)
+    except Exception as exc:  # noqa: BLE001
+        log("звук %s: %s" % (name, exc))
+        return False
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        log("звук %s: GStreamer %s" % (name, detail[-160:]))
+        return False
+    return True
+
+
 def say(text, append=1):
     if not text:
         return
@@ -109,24 +219,31 @@ def say(text, append=1):
         pass
     chunks = chunk_text(text)
     for index, chunk in enumerate(chunks):
+        wait = max(6.0, min(90.0, 1.5 + len(chunk) / 18.0))
+        expected = 1.0 + len(chunk) / 11.0
         try:
-            payload = {"text": chunk, "wait": 30}
+            payload = {"text": chunk, "wait": wait}
             if append == 0:
                 payload["append"] = 0
-            post(BASE + "/cgi-bin/speak.py", payload, timeout=40)
+            posted_at = time.time()
+            post(BASE + "/cgi-bin/speak.py", payload, timeout=wait + 15)
+            # speak.py отвечает сразу после отправки кадра (fork), поэтому
+            # конец фразы ждём по реальной работе динамика, а не по таймеру.
+            status = wait_speaker_idle(
+                expected=expected,
+                start_timeout=min(8.0, wait),
+                limit=expected + 30.0,
+            )
+            if status == SPEAKER_UNKNOWN:
+                # /proc/asound недоступен или звук не стартовал: не открываем
+                # микрофон раньше оценки длительности, иначе поймаем эхо.
+                left = expected - (time.time() - posted_at)
+                if left > 0:
+                    time.sleep(min(left, 60.0))
         except Exception:
             pass
         if index + 1 < len(chunks):
-            time.sleep(0.4)
-
-
-def hush_native():
-    """Перебить текущую речь штатной Алисы TTS-директивой с append=0."""
-    try:
-        post(BASE + "/cgi-bin/speak.py",
-             {"text": "\u200b", "append": 0, "wait": 3}, timeout=8)
-    except Exception:
-        pass
+            time.sleep(0.3)
 
 
 def announce(text, pause=False):
@@ -270,10 +387,19 @@ def match(text):
     return None
 
 
-def recognize():
+def recognize(timeout=60, empty_on_timeout=False):
+    ms = max(1000, min(60000, int(timeout * 1000)))
+    url = LUNA + "/api/alice/recognize?timeout_ms=%d" % ms
+    if empty_on_timeout:
+        url += "&empty_on_timeout=true"
     try:
-        data = post(LUNA + "/api/alice/recognize", {}, timeout=120)
-    except Exception:
+        data = post(url, {}, timeout=timeout + 5)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 400:
+            log("recognize http %s" % exc.code)
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        log("recognize error: %s" % exc)
         return ""
     for key in ("transcript", "text"):
         value = data.get(key)
@@ -296,21 +422,56 @@ def llm_enabled():
         return False
 
 
-def wait_alice_finish(timeout=15):
-    """Дать штатной Алисе договорить, чтобы наш ответ не наложился."""
-    time.sleep(1.2)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            data = get(BASE + "/cgi-bin/player.py", timeout=6) or {}
-            if data.get("alice") == "IDLE":
-                return
-        except Exception:
-            return
-        time.sleep(0.7)
-
-
 _NATIVE_LAST_ACTIVE = 0.0
+_LAST_LLM_AT = 0.0
+
+
+def _env_float(name, default, low, high):
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    if value != value:  # NaN
+        return default
+    return max(low, min(high, value))
+
+
+def _env_int(name, default, low, high):
+    try:
+        value = int(float(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, value))
+
+
+FOLLOW_UP_SECONDS = _env_float("MYPULT_FOLLOW_UP_SECONDS", 8, 1, 30)
+FOLLOW_UP_TURNS = _env_int("MYPULT_FOLLOW_UP_TURNS", 3, 0, 10)
+# Бюджет слушания: учитываются только окна recognize, без LLM и озвучки.
+FOLLOW_UP_TOTAL = _env_float("MYPULT_FOLLOW_UP_TOTAL", 45, 0, 180)
+FOLLOW_UP_CUE = os.environ.get("MYPULT_FOLLOW_UP_CUE", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+RECENT_PHRASES = 8
+_RECENT = []
+
+
+def _remember_phrase(text):
+    _RECENT.append((text, time.time()))
+    del _RECENT[:-RECENT_PHRASES]
+
+
+def _is_recent_phrase(text, window=30.0):
+    if not text:
+        return False
+    now = time.time()
+    return any(item == text and now - seen < window for item, seen in _RECENT)
+
+
+def play_listen_cue():
+    play_sound("spotter_start")
+
+
+def play_cancel_cue():
+    play_sound("spotter_cancel")
 
 
 def native_alice_busy():
@@ -653,6 +814,7 @@ def run_scenario(text):
 
 
 def handle(text):
+    global _LAST_LLM_AT
     # Список радио обрабатываем до сценариев: иначе Алиса успевает
     # ответить, пока ждём HTTP-ответ scenarios.py.
     intent = match(text)
@@ -737,6 +899,7 @@ def handle(text):
         generation = time.time() - started_at
         stop_alice_speech()
         say(answer)
+        _LAST_LLM_AT = time.time()
         log("llm answer: %d символов, генерация %.1f с"
             % (len(answer), generation))
         return True
@@ -814,14 +977,60 @@ def should_silence(text):
     return llm_enabled()
 
 
+def follow_up():
+    """Окно продолжения диалога без повторного «Алиса».
+
+    Luna recognize с empty_on_timeout=true сам запускает recognition-only и
+    возвращает 204, если за timeout_ms никто не заговорил. Поэтому после
+    ответа мы просто слушаем короткое окно; если речь есть — отправляем её в
+    LLM и продлеваем окно, пока пользователь продолжает.
+    """
+    global _LAST_LLM_AT
+    if FOLLOW_UP_TURNS <= 0 or FOLLOW_UP_SECONDS <= 0 or FOLLOW_UP_TOTAL <= 0:
+        return
+    started_at = time.time()
+    budget = FOLLOW_UP_TOTAL
+    turns = 0
+    while turns < FOLLOW_UP_TURNS and budget > 0:
+        if native_alice_busy():
+            log("продолжение: Алиса активна — закрываю окно")
+            break
+        play_listen_cue()
+        window = max(1.0, min(FOLLOW_UP_SECONDS, 60.0, budget))
+        listen_started = time.time()
+        text = recognize(timeout=window, empty_on_timeout=True)
+        budget -= max(0.0, time.time() - listen_started)
+        if not text:
+            # Пользователь ничего не сказал: тот же звук отмены, что у Алисы.
+            play_cancel_cue()
+            log("продолжение: тишина — закрываю окно")
+            break
+        if _is_recent_phrase(text):
+            # Luna повторяет финальный транскрипт: второй раз не отвечаем.
+            log("продолжение: повтор фразы — закрываю окно")
+            break
+        _remember_phrase(text)
+        log("продолжение: %r" % text)
+        before = _LAST_LLM_AT
+        handle(text)
+        if _LAST_LLM_AT == before:
+            # Это была команда, а не вопрос к LLM — окно закрыто.
+            break
+        turns += 1
+        # say() ждёт реального конца озвучки по состоянию ALSA PCM, но даём
+        # динамику окончательно затихнуть, чтобы следующий recognize не поймал
+        # хвост собственного ответа.
+        time.sleep(0.4)
+    log("продолжение: %d ход(ов) за %.1f с (тишины %.1f с)"
+        % (turns, time.time() - started_at, FOLLOW_UP_TOTAL - budget))
+
+
 def main():
     log("голосовой пульт запущен")
     threading.Thread(target=scheduler_loop, daemon=True).start()
     threading.Thread(target=autobright_loop, daemon=True).start()
     threading.Thread(target=volume_sync_loop, daemon=True).start()
     threading.Thread(target=disk_cleanup_loop, daemon=True).start()
-    last_text = ""
-    last_ts = 0.0
     while True:
         if native_alice_busy():
             time.sleep(0.6)
@@ -842,13 +1051,13 @@ def main():
             continue
         # recognize иногда отдаёт одну и ту же фразу несколько раз подряд,
         # причём с паузой больше 4 секунд — держим окно 30 секунд.
-        if text == last_text and (time.time() - last_ts) < 30:
+        if _is_recent_phrase(text):
             # Luna иногда отдаёт тот же финальный текст повторно; не занимаем
             # микрофон новым recognize каждые 10 секунд.
             time.sleep(8)
             continue
         log("распознано за %.1f с: %r" % (time.time() - started, text))
-        last_text, last_ts = text, time.time()
+        _remember_phrase(text)
         silenced = False
         if should_silence(text):
             try:
@@ -859,8 +1068,11 @@ def main():
                 pass
         try:
             handle_started = time.time()
+            before_llm = _LAST_LLM_AT
             handle(text)
             log("обработано за %.1f с" % (time.time() - handle_started))
+            if _LAST_LLM_AT != before_llm:
+                follow_up()
         except Exception as exc:  # noqa: BLE001
             log("handle error: %s" % exc)
             time.sleep(1)
