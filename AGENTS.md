@@ -29,6 +29,11 @@ DeepSeek) и голосовой пульт на самой колонке.
   картой ошибок (`errors.types`, `errors.codes`, `errors.default`).
 - Команды Алисы (музыка, треки, громкость) не отдаются в LLM — это зона
   `voice_daemon.py`.
+- Окно продолжения диалога настраивается переменными окружения
+  `MYPULT_FOLLOW_UP_SECONDS`, `MYPULT_FOLLOW_UP_TURNS`,
+  `MYPULT_FOLLOW_UP_TOTAL`; `MYPULT_FOLLOW_UP_CUE=0` отключает звуки. Звуки —
+  штатные `spotter_start`/`spotter_cancel` из `common`, их нельзя дублировать
+  своими файлами в репозитории.
 - Секреты (ключи, токены, `llm.json`, `runtime.env`) не попадают в репозиторий.
 
 ## 3. Процесс разработки — жёсткий порядок
@@ -84,7 +89,7 @@ node --check /tmp/ui_check.js
 Тесты:
 
 ```sh
-python tests/test_units.py       # 196 проверок
+python tests/test_units.py       # 235 проверок
 python tests/static_checks.py    # 122 проверки
 python tests/run_cgi_tests.py    # 42 проверки
 ```
