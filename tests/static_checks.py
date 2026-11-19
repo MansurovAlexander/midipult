@@ -48,13 +48,13 @@ def test_encoding():
             path = os.path.join(folder, name)
             with open(path, "rb") as fh:
                 raw = fh.read()
-            if b"\r\n" in raw:
+            # .ps1 намеренно с CRLF и BOM: Windows PowerShell 5.1 иначе
+            # читает кириллицу как ANSI и ломает разбор скрипта.
+            if b"\r\n" in raw and not name.endswith(".ps1"):
                 bad.append(os.path.relpath(path, ROOT) + " (CRLF)")
-            # .ps1 намеренно с BOM: Windows PowerShell 5.1 иначе читает
-            # кириллицу как ANSI и ломает разбор скрипта.
             if raw.startswith(b"\xef\xbb\xbf") and not name.endswith(".ps1"):
                 bad.append(os.path.relpath(path, ROOT) + " (BOM)")
-    check("файлы без CRLF и BOM", not bad, ", ".join(bad))
+    check("файлы без CRLF (кроме .ps1) и BOM", not bad, ", ".join(bad))
 
 
 def test_html_structure():
