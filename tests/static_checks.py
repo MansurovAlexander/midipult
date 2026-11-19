@@ -62,6 +62,9 @@ def test_encoding():
                     bad.append(os.path.relpath(path, ROOT) + " (не UTF-8)")
                 if b"\x00" in raw:
                     bad.append(os.path.relpath(path, ROOT) + " (NUL)")
+                if (any(byte >= 0x80 for byte in raw)
+                        and not raw.startswith(b"\xef\xbb\xbf")):
+                    bad.append(os.path.relpath(path, ROOT) + " (UTF-8 без BOM)")
     check("файлы без CRLF (кроме .ps1/.cmd) и BOM", not bad, ", ".join(bad))
 
 
