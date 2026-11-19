@@ -423,7 +423,12 @@ def test_p2_hardening():
     check("P3: sing-box SHA/size/HTTPS",
           "BINARY_HASH" in vpn_py and "MAX_BINARY" in vpn_py
           and "size > MAX_BINARY" in vpn_py
-          and "SHA-256 не совпал" in vpn_py)
+          and "SHA-256 не совпал" in vpn_py
+          and "PINNED_SHA256" in vpn_py)
+    check("P3: sing-box распаковка без shell",
+          'filter="data"' in vpn_py and "issym()" in vpn_py
+          and "islnk()" in vpn_py and "/bin/sh" not in vpn_py
+          and "gzip -dc" not in vpn_py)
     check("P3: PIN HTTP warning", 'id="pinInsecure"' in html
           and "location.protocol === 'http:'" in html)
     check("P3: автояркость manual показывает паузу",
