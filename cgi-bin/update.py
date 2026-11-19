@@ -32,7 +32,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
-REPO = "RoBiN19666/midipult"
+REPO = (os.environ.get("MYPULT_UPDATE_REPO") or
+        "MansurovAlexander/midipult")
 API_URL = os.environ.get("MYPULT_UPDATE_API") or (
     "https://api.github.com/repos/%s/releases?per_page=30" % REPO)
 WEB_ROOT = "/data/myweb"
@@ -111,6 +112,8 @@ def release_version(item):
 
 def pick_panel_release(items):
     """Первый опубликованный релиз панели; draft, prerelease и Android пропускаются."""
+    if not items:
+        raise ValueError("Релизы панели не найдены")
     for item in items:
         if not isinstance(item, dict) or item.get("draft") or item.get("prerelease"):
             continue

@@ -578,6 +578,13 @@ def test_update_release_filter():
         rejected = True
     check("update: только Android -> ошибка", rejected)
 
+    try:
+        update.pick_panel_release([])
+        rejected = False
+    except ValueError:
+        rejected = True
+    check("update: пустой список релизов -> ошибка", rejected)
+
     archive, sha = update.release_assets(panel, "0.4.52")
     check("update: архив и sha релиза панели найдены", bool(archive and sha))
 
