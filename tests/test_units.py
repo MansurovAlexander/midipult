@@ -875,6 +875,25 @@ def test_llm_errors_and_models():
         llm.urllib.request.urlopen = original
 
 
+def test_llm_profile_id():
+    config = {"profiles": [], "active": None}
+    data = {
+        "profile_id": "aitunnel",
+        "name": "AITUNNEL DeepSeek V4.1 Flash",
+        "provider": "aitunnel",
+        "model": "deepseek-v4.1-flash-1017",
+        "base_url": "https://api.aitunnel.ru/v1",
+        "key": "k",
+    }
+    first = llm.save_profile(config, data)
+    check("профиль: стабильный id из profile_id",
+          first.get("id") == "aitunnel", str(first))
+    llm.save_profile(config, dict(data, name="Другое имя"))
+    check("профиль: повторный запуск не плодит дубли",
+          len(config["profiles"]) == 1 and config["profiles"][0].get("id") == "aitunnel",
+          str(config["profiles"]))
+
+
 def main():
     for test in (
         test_generic_helpers,
@@ -899,6 +918,7 @@ def main():
         test_update_fetch_release,
         test_llm_chat_names,
         test_llm_errors_and_models,
+        test_llm_profile_id,
         test_voice_chat_commands,
         test_voice_chat_actions,
     ):

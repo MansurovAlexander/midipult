@@ -589,12 +589,14 @@ def save_profile(config, data):
 
     if profile is None:
         base_name = name or (PROVIDERS.get(provider, {}).get("title") if provider else "Профиль")
-        pid = slug(base_name)
         existing = {item.get("id") for item in profiles}
+        # profile_id позволяет вызывающему (deploy/aitunnel-profile.sh) получить
+        # стабильный id: повторный запуск обновит профиль, а не создаст дубль.
+        requested = slug(str(pid or "").strip()) if str(pid or "").strip() else ""
+        candidate = requested if requested and requested not in existing else slug(base_name)
         suffix = 2
-        candidate = pid
         while candidate in existing:
-            candidate = "%s-%d" % (pid, suffix)
+            candidate = "%s-%d" % (candidate, suffix)
             suffix += 1
         profile = {"id": candidate, "name": base_name, "provider": provider or "openai",
                    "model": "", "base_url": "", "key": ""}
