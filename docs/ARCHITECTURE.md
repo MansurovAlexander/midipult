@@ -124,7 +124,7 @@ tests/                     статические, юнит- и CGI-тесты
 | `sounds.py` | список, скачивание, бэкап и замена системных звуков |
 | `speak.py` | озвучка текста (IPC 9875) |
 | `command.py` | `sendText` в Glagol, в т.ч. «стоп» |
-| `update.py` | проверка GitHub Releases, self-update, статус |
+| `update.py` | проверка GitHub Releases форка (по умолчанию `MansurovAlexander/midipult`, переопределение — `MYPULT_UPDATE_REPO`/`MYPULT_UPDATE_API`), self-update, статус |
 | `discovery.py` | UDP-ответ для Android-приложения на порту 8056 |
 | `vpn.py` | подписка, серверы, старт/стоп, статус |
 | `network.py` | Wi-Fi, скан, подключение, DNS |
@@ -306,14 +306,16 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 ## 8. Деплой
 
 `deploy/install.sh`:
-1. запускает `deploy/preflight.sh`: модель `/proc/device-tree/model`
-   (Cucumber/Midi), root, Entware, `opkg`, пакеты (`python3`, `lighttpd`,
-   `mod_cgi`, `mod_proxy`, `curl`, `python3-websocket-client`), Luna, IPC,
-   место; недостающие пакеты ставит;
+1. создаёт каталог веб-рута `/data/myweb` (`mkdir -p`) и запускает
+   `deploy/preflight.sh`: модель `/proc/device-tree/model` (Cucumber/Midi),
+   root, Entware, `opkg`, пакеты (`python3`, `lighttpd`, `mod_cgi`,
+   `mod_proxy`, `curl`), Luna, IPC, свободное место на `/` и `/data`;
+   недостающие пакеты ставит через `opkg`, а `websocket-client` — через
+   `python3 -m pip install`, если в Entware пакета нет;
 2. копирует `index.html`, `index.py`, `manifest.json`, `favicon.ico`,
    `icon-192.png`, `icon-512.png`, `icon.png`, CGI, конфиг, init и демоны;
 3. проверяет `lighttpd -t`;
-4. делает бэкап конфигов в `/data/mypult/backup`;
+4. делает бэкап старых конфигов и файлов в `/tmp/mypult-backup-<дата>`;
 5. вызывает `reload`: web + voice + state (панель пропадает на 2–3 секунды,
    зато конфиг применяется);
 6. проверяет, что панель и CGI отвечают.
@@ -331,9 +333,10 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 
 ## 9. Тесты
 
-- `tests/static_checks.py` — 106 проверок: структура HTML, дубликаты id,
-  версия/CHANGELOG, кодировка и переводы строк;
-- `tests/test_units.py` — 164 проверки чистой логики;
+- `tests/static_checks.py` — 109 проверок: структура HTML, дубликаты id,
+  версия/CHANGELOG, кодировка и переводы строк (одна проверка про CRLF
+  известна и не блокирует);
+- `tests/test_units.py` — 165 проверок чистой логики;
 - `tests/run_cgi_tests.py` — 42 проверки CGI на стенде.
 
 Запуск:
@@ -374,7 +377,12 @@ CGI запускаются от root: иначе недоступны sysfs, `am
 - **Остановка Алисы** — через `sendText «стоп»`; при позднем старте TTS
   возможны первые слоги.
 - **Статический IP** и HTTPS не реализованы.
-- **Самообновление с GitHub** не включено.
+- **Самообновление из панели** смотрит в форк `MansurovAlexander/midipult`,
+  но релизов панели там пока нет: панель отвечает «Релизы панели не найдены»
+  и upstream-обновление не предлагает. Обновление заработает после релиза с
+  `midipult-<версия>.tar.gz` и `.sha256`. `MYPULT_UPDATE_REPO` и
+  `MYPULT_UPDATE_API` — dev-переопределения; с устройства окружение lighttpd
+  не пробрасывается, их нужно задавать в init-скрипте/окружении запуска.
 - **FastCGI** в сборке отсутствует (`mod_fastcgi`/`flup`); горячий `/state`
   обслуживает отдельный локальный демон.
 

@@ -203,13 +203,7 @@ POST /cgi-bin/llm.py
 
 1. На колонке должен быть root, Entware и Luna на `127.0.0.1:8099`
    (см. основной README).
-2. Создайте каталог веб-рута (установщик его не создаёт):
-
-   ```sh
-   mkdir -p /data/myweb
-   ```
-
-3. Скачайте форк и запустите установщик:
+2. Скачайте форк и запустите установщик:
 
    ```sh
    cd /tmp && rm -rf mp && mkdir mp && cd mp
@@ -217,6 +211,10 @@ POST /cgi-bin/llm.py
    unzip -q f.zip && cd midipult-main
    sh deploy/install.sh
    ```
+
+   Установщик сам создаст веб-рут `/data/myweb`, поставит недостающие пакеты
+   через `opkg`, а `websocket-client` — через `pip`, если `opkg` его не нашёл.
+   Создавать `/data/myweb` вручную не нужно.
 
    С Windows удобнее `deploy/push-to-station.ps1 -Station <IP>`.
 
