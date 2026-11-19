@@ -823,6 +823,14 @@ def test_voice_routing_guards():
           voice_daemon.alice_owns("Алиса, пожалуйста, следующий") is True)
     check("голос: «сделай погромче» — команда Алисы",
           voice_daemon.alice_owns("Алиса, сделай погромче") is True)
+    check("голос: вопрос про VPN доходит до LLM",
+          voice_daemon.alice_owns("Алиса, как включить впн?") is False)
+    check("голос: вопрос про звук доходит до LLM",
+          voice_daemon.alice_owns("Алиса, почему не работает звук?") is False)
+    check("голос: вопрос про громкость доходит до LLM",
+          voice_daemon.alice_owns("Алиса, что значит громкость?") is False)
+    check("голос: «что играет» остаётся командой Алисы",
+          voice_daemon.alice_owns("Алиса, что играет") is True)
 
     old_path = voice_daemon.SCENARIO_PATH
     old_mtime = voice_daemon._SCENARIO_MTIME
@@ -867,8 +875,14 @@ def test_voice_switch_dry_run():
         voice_daemon.post = lambda url, payload, timeout=60: calls.append(
             ("post", payload)) or {}
         voice_daemon.announce = lambda text, pause=False: calls.append(("say", text))
-        voice_daemon.llm_info = lambda: {"profiles": [
-            {"id": "deepseek", "name": "DeepSeek", "provider": "deepseek"}]}
+        voice_daemon.llm_info = lambda: {
+            "profiles": [{"id": "deepseek", "name": "DeepSeek", "provider": "deepseek"}],
+            "chats": [{"id": "chat-1", "name": "Чат 1"}],
+            "active_chat": "chat-1",
+            "active_chat_name": "Чат 1",
+            "active_name": "DeepSeek",
+            "enabled": True,
+        }
         voice_daemon.llm_enabled = lambda: True
         voice_daemon.scenario_may_match = lambda text: False
         voice_daemon.stop_music_soon = lambda *args, **kwargs: calls.append(("music",))
@@ -882,6 +896,21 @@ def test_voice_switch_dry_run():
         check("голос: dry-run не переключает профиль",
               voice_daemon.llm_switch("включи дипсик", dry_run=True) is True
               and not calls, str(calls))
+        check("голос: вопрос не выключает профиль",
+              voice_daemon.llm_switch("можно ли выключить дипсик?", dry_run=True) is False
+              and not calls, str(calls))
+        check("голос: «включён ли» не переключает профиль",
+              voice_daemon.llm_switch("включён ли дипсик?", dry_run=True) is False
+              and not calls, str(calls))
+        check("голос: «какой чат?» — информационный запрос",
+              voice_daemon.llm_switch("какой чат?", dry_run=True) is True
+              and not calls, str(calls))
+        check("голос: вопрос не удаляет чат",
+              voice_daemon.llm_switch("удали чат?", dry_run=True) is False
+              and not calls, str(calls))
+
+        voice_daemon.llm_switch("можно ли выключить дипсик?")
+        check("голос: реальный вопрос не выключает профиль", not calls, str(calls))
 
         calls[:] = []
         voice_daemon.llm_switch("включи дипсик")

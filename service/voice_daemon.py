@@ -174,8 +174,8 @@ ALICE_MEDIA_WORDS = ("музык", "трек", "песн", "альбом", "пл
 ALICE_PLAYER_WORDS = ("пауза", "продолж", "следующ", "предыдущ", "перемот",
                       "отмот", "промот", "дальше", "назад", "вперед",
                       "играй", "играть", "поставь", "включи", "выключи",
-                      "вруби", "стоп", "останов", "громче", "тише",
-                      "громкость", "звук", "что играет")
+                      "вруби", "стоп", "останов", "громче", "погромче",
+                      "тише", "потише", "громкость", "звук")
 RADIO_LIST = ("какие радио", "какие станции", "список радио", "перечисли радио",
               "что за радио", "какие есть радио", "какие радиостанции",
               "какие радио ты знаешь", "какие радиостанции ты знаешь",
@@ -197,6 +197,7 @@ FILLER_WORDS = frozenset({
 QUESTION_WORDS = frozenset({
     "как", "можно", "что", "почему", "зачем", "где", "когда",
     "какой", "какая", "какие", "какое", "подскажи", "расскажи", "объясни",
+    "включен", "выключен", "работает", "правда", "разве", "неужели",
 })
 
 
@@ -212,8 +213,12 @@ def is_question(text, low):
     """Вопрос, а не императив. «?» после normalize теряется, поэтому смотрим raw."""
     if str(text or "").strip().endswith("?"):
         return True
-    first = low.split()[0] if low else ""
-    return first in QUESTION_WORDS
+    words = low.split()
+    if not words:
+        return False
+    if "ли" in words or "разве" in words or "неужели" in words:
+        return True
+    return words[0] in QUESTION_WORDS
 
 
 def alice_owns(text):
@@ -223,8 +228,10 @@ def alice_owns(text):
         return False
     if has_any(low, ALICE_MEDIA_WORDS):
         return True
-    # Не только startswith: «погромче», «переключи следующий» и т.п.
-    return has_any(low, ALICE_PLAYER_WORDS)
+    if low in ("что играет", "что сейчас играет") or low.startswith("что играет сейчас"):
+        return True
+    # Только начало фразы: «как включить впн» — вопрос для LLM, а не плеер.
+    return any(low.startswith(word) for word in ALICE_PLAYER_WORDS)
 
 
 def match(text):
@@ -456,9 +463,12 @@ def chat_select_by_name(name):
 def llm_switch(text, dry_run=False):
     """Переключение LLM/чата. dry_run проверяет сценарий без POST и озвучки."""
     low = strip_fillers(normalize(text))
+    question = is_question(text, low)
 
     command = parse_chat_command(text)
     if command:
+        if question:
+            return False
         if dry_run:
             return True
         kind, name = command
@@ -476,6 +486,9 @@ def llm_switch(text, dry_run=False):
                 return True
             announce("Сейчас " + str(info.get("active_chat_name") or "чат"))
             return True
+        if question:
+            # «можно ли удалить чат?» — не команда.
+            return False
         if "удал" in low or "закрой" in low:
             if not info.get("active_chat"):
                 return False
@@ -512,6 +525,22 @@ def llm_switch(text, dry_run=False):
                 log("chat switch error: %s" % exc)
                 return False
 
+    if any(phrase in low for phrase in ("какая нейросеть", "что за нейросеть", "какой профиль")):
+        if dry_run:
+            return True
+        info = llm_info()
+        active = info.get("active_name")
+        if info.get("enabled") and active:
+            announce("Сейчас включена нейросеть " + str(active))
+        elif active:
+            announce("Нейросеть выключена. Активный профиль: " + str(active))
+        else:
+            announce("Профили нейросети не настроены")
+        return True
+
+    if question:
+        return False
+
     if not any(word in low for word in
                ("нейросет", "профил", "переключ", "включ", "выключ", "отключ", "запуст")):
         return False
@@ -539,18 +568,6 @@ def llm_switch(text, dry_run=False):
             log("llm switch error: %s" % exc)
             return False
 
-    if any(phrase in low for phrase in ("какая нейросеть", "что за нейросеть", "какой профиль")):
-        if dry_run:
-            return True
-        info = llm_info()
-        active = info.get("active_name")
-        if info.get("enabled") and active:
-            announce("Сейчас включена нейросеть " + str(active))
-        elif active:
-            announce("Нейросеть выключена. Активный профиль: " + str(active))
-        else:
-            announce("Профили нейросети не настроены")
-        return True
     return False
 
 
