@@ -493,7 +493,7 @@ def test_uninstall_safety():
           "/proc/$pid/cmdline" in text and "tr -dc '0-9'" in text)
     check("uninstall: проверяет voice/state/lighttpd",
           "voice_daemon.py" in text and "state_daemon.py" in text
-          and '"lighttpd"' in text)
+          and '"myweb.conf"' in text)
 
 
 def main():
