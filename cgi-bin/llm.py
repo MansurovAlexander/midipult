@@ -28,6 +28,13 @@ CONFIG_DIR = "/data/mypult"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "llm.json")
 CHATS_PATH = os.path.join(CONFIG_DIR, "chats.json")
 
+USER_AGENT = "MidiPult/0.4.68"
+
+
+def normalize_provider(provider):
+    """Пустой провайдер исторически означает OpenAI."""
+    return str(provider or "").strip() or "openai"
+
 # Общие тексты ошибок: используются, если у провайдера нет своего варианта.
 BASE_ERRORS = {
     "codes": {
@@ -217,7 +224,7 @@ def custom_error_messages(config, provider):
 
 def error_text(config, profile, code, etype="", ecode=""):
     """Текст ошибки: свои правки, затем провайдер, затем общий вариант."""
-    provider = (profile or {}).get("provider") or ""
+    provider = normalize_provider((profile or {}).get("provider"))
     custom = custom_error_messages(config, provider)
     for key in (etype, str(ecode or ""), str(code), "default"):
         if key and key in custom:
@@ -229,22 +236,43 @@ def error_text(config, profile, code, etype="", ecode=""):
     return errs["codes"].get(code) or errs["default"]
 
 
-def fetch_models(profile):
-    """Модели: по ключу, иначе публичный каталог, иначе встроенный список."""
-    provider = (profile or {}).get("provider") or "openai"
-    base_url = ((profile or {}).get("base_url")
-                or PROVIDERS.get(provider, {}).get("base_url") or "").rstrip("/")
-    key = (profile or {}).get("key") or ""
+def fetch_models(profile, provider=None, requested_base=None):
+    """Модели для провайдера: по ключу, иначе публичный каталог, иначе встроенный.
+
+    Ключ активного профиля используется только если выбранный провайдер и
+    base_url совпадают с активным — иначе каталог был бы от чужого сервиса.
+    """
+    active = profile or {}
+    provider = normalize_provider(provider or active.get("provider"))
+    requested_base = str(requested_base or "").strip()
+    active_base = str(active.get("base_url") or "").strip()
+    base_url = (requested_base
+                or PROVIDERS.get(provider, {}).get("base_url")
+                or (active_base if provider == normalize_provider(active.get("provider")) else "")
+                or "").rstrip("/")
+
+    key = ""
+    if provider == normalize_provider(active.get("provider")):
+        if not requested_base or requested_base.rstrip("/") == active_base.rstrip("/"):
+            key = str(active.get("key") or "")
+
+    if base_url:
+        try:
+            base_url = common.url_guard(base_url, allow_http=True,
+                                        allow_private=True, allow_loopback=True)
+        except ValueError:
+            base_url = ""
 
     if base_url and key:
         try:
             request = urllib.request.Request(
                 base_url + "/models",
                 headers={"Authorization": "Bearer " + key,
-                         "User-Agent": "MidiPult/0.4.68"})
+                         "User-Agent": USER_AGENT})
             with urllib.request.urlopen(request, timeout=20) as response:
-                data = json.loads(response.read().decode("utf-8", "replace"))
-            ids = sorted({str(item.get("id")) for item in (data.get("data") or [])
+                data = json.loads(response.read(1024 * 1024).decode("utf-8", "replace"))
+            items = data.get("data") if isinstance(data, dict) else None
+            ids = sorted({str(item.get("id")) for item in (items or [])
                           if isinstance(item, dict) and item.get("id")})
             if ids:
                 return ids, "key"
@@ -253,10 +281,11 @@ def fetch_models(profile):
 
     if provider == "aitunnel" or "aitunnel" in base_url:
         try:
-            with urllib.request.urlopen(
-                    "https://api.aitunnel.ru/public/aitunnel/models",
-                    timeout=20) as response:
-                data = json.loads(response.read().decode("utf-8", "replace"))
+            request = urllib.request.Request(
+                "https://api.aitunnel.ru/public/aitunnel/models",
+                headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                data = json.loads(response.read(2 * 1024 * 1024).decode("utf-8", "replace"))
             chat = data.get("chat") if isinstance(data, dict) else None
             if isinstance(chat, dict) and chat:
                 return sorted(chat.keys()), "public"
@@ -479,7 +508,7 @@ def ask(prompt, system=None):
         headers={
             "Content-Type": "application/json",
             "Authorization": "Bearer " + profile["key"],
-            "User-Agent": "MidiPult/0.4.68",
+            "User-Agent": USER_AGENT,
         },
         method="POST",
     )
@@ -507,8 +536,10 @@ def ask(prompt, system=None):
         except (ValueError, TypeError):
             pass
         short = error_text(config, profile, exc.code, etype, ecode)
-        common.fail(exc.code if 400 <= exc.code < 600 else 502, short,
-                    hint=hint[:300], detail=raw[:400], error_type=etype or None)
+        # Ошибка провайдера всегда отдаётся как 502: наружу не должны утекать
+        # 401/402 провайдера, которые не отличить от PIN/биллинга самого пульта.
+        common.fail(502, short, hint=hint[:300], detail=raw[:400],
+                    error_type=etype or None, provider_status=exc.code)
         return
     except (urllib.error.URLError, OSError) as exc:
         common.fail(502, "Нет связи с сервисом нейросети",
@@ -707,8 +738,10 @@ def main():
 
     if data.get("models") is not None:
         profile = active_profile(config)
-        models, source = fetch_models(profile)
-        common.respond(200, {"ok": True, "models": models, "source": source})
+        provider = data.get("provider") or (profile or {}).get("provider")
+        models, source = fetch_models(profile, provider, data.get("base_url"))
+        common.respond(200, {"ok": True, "models": models, "source": source,
+                             "provider": normalize_provider(provider)})
         return
 
     if data.get("error_messages_text") is not None:

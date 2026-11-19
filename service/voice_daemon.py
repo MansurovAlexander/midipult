@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -630,9 +631,11 @@ def handle(text):
             except urllib.error.HTTPError as exc:
                 message = ""
                 try:
-                    payload = json.loads(exc.read().decode("utf-8", "replace"))
-                    message = str(payload.get("error") or "")
-                except (ValueError, OSError):
+                    payload = json.loads(exc.read(2000).decode("utf-8", "replace"))
+                    if isinstance(payload, dict):
+                        message = str(payload.get("error") or "")
+                except (ValueError, OSError, TypeError, AttributeError,
+                        http.client.HTTPException):
                     message = ""
                 box["error"] = message or ("ошибка сервиса, код %s" % exc.code)
             except Exception as exc:  # noqa: BLE001

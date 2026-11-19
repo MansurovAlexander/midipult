@@ -22,7 +22,7 @@ URL="$ORIGIN/cgi-bin/llm.py"
 CURL=/opt/bin/curl
 [ -x "$CURL" ] || CURL=curl
 
-BODY=$(printf '{"profile_id":"aitunnel","name":"AITUNNEL DeepSeek V4.1 Flash","provider":"custom","model":"%s","base_url":"%s","key":"%s"}' \
+BODY=$(printf '{"profile_id":"aitunnel","name":"AITUNNEL DeepSeek V4.1 Flash","provider":"aitunnel","model":"%s","base_url":"%s","key":"%s"}' \
     "$MODEL" "$BASE" "$KEY")
 
 "$CURL" -s -X POST "$URL" \
