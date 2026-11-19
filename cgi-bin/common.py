@@ -400,7 +400,7 @@ def glagol_send(payload: dict, url: str | None = None, connect_timeout: float = 
     try:
         import websocket
     except Exception as exc:  # pragma: no cover - зависит от станции
-        return None, "python3-websocket-client не установлен: yse install python3-websocket-client"
+        return None, "websocket-client не установлен: python3 -m pip install websocket-client"
 
     target = url or GLAGOL_WS
     ws = None

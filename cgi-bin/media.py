@@ -242,7 +242,7 @@ def main():
         common.fail(
             501,
             "Модуль websocket-client не установлен",
-            hint="yse install python3-websocket-client",
+            hint="python3 -m pip install websocket-client",
             luna=luna_note,
         )
         return

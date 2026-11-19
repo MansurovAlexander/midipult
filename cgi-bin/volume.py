@@ -302,7 +302,7 @@ def main():
                 501,
                 "Громкость недоступна: amixer не найден, Glagol не ответил",
                 detail={"amixer": amixer, "glagol": error, "diagnostics": diagnostics},
-                hint="yse install alsa-utils  (и/или python3-websocket-client)",
+                hint="yse install alsa-utils  (и/или python3 -m pip install websocket-client)",
             )
             return
         common.fail(
