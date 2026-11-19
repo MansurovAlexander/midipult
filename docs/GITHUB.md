@@ -58,7 +58,7 @@ git push -u origin main
 - синтаксис Python — `compileall` для `cgi-bin`, `service`, `tests` и
   `py_compile index.py`;
 - синтаксис shell — `sh -n` для всех `deploy/*.sh` и `init.d/S99mypult`;
-- тесты — `tests/test_units.py` (191), `tests/static_checks.py` (121) и
+- тесты — `tests/test_units.py` (192), `tests/static_checks.py` (121) и
   `tests/run_cgi_tests.py` (42).
 
 Условия прогона: Ubuntu, Python 3.12, Node 24, права `contents: read`,
@@ -99,6 +99,19 @@ Select-String -Path *.md,*.html,*.json,cgi-bin\*.py,service\*.py,deploy\* `
 - `vpn.json` (подписка);
 - `chats.json` (личные вопросы к нейросети);
 - логи `voice.log`, `mypult.log`.
+
+## Релизы панели
+
+`version.json` — источник истины версии; заголовок `CHANGELOG.md` должен
+совпадать с ним по номеру и дате. GitHub Release — отдельный ручной шаг:
+`deploy/build-release.ps1` собирает `midipult-<версия>.tar.gz` и `.sha256`
+для приложения к релизу; сам тег и релиз скрипт не создаёт.
+
+Пока для текущей версии GitHub Release не создан (так было при выпуске
+`0.4.69`), «Система → Обновление» отвечает «Релизы панели не найдены» и
+ничего не предлагает; на уже установленную панель это не влияет.
+Обновление из панели заработает после публикации релиза с архивом и
+контрольной суммой.
 
 ## Лицензия
 

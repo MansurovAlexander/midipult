@@ -84,7 +84,7 @@ node --check /tmp/ui_check.js
 Тесты:
 
 ```sh
-python tests/test_units.py       # 191 проверка
+python tests/test_units.py       # 192 проверки
 python tests/static_checks.py    # 121 проверка
 python tests/run_cgi_tests.py    # 42 проверки
 ```
@@ -117,6 +117,12 @@ Workflow запускается на push в `main` и на каждый pull_re
 кроме `.ps1`/`.cmd` (для них в `.gitattributes` задано `eol=crlf`);
 BOM допустим только у `.ps1`. Остальные файлы — LF и без BOM, иначе
 `static_checks` падает на проверке «файлы без CRLF (кроме .ps1/.cmd) и BOM».
+
+Проверка читает файлы как байты и не распознаёт повреждённую кодировку:
+`.ps1` со смешанными UTF-16LE/UTF-8 строками проходит её, но PowerShell
+такой файл не выполняет (так было с `deploy/push-to-station.ps1`).
+Кодировку `.ps1` проверяйте отдельно — например, `file` в Git Bash или
+открытием в редакторе; в CI такой дефект не ловится.
 
 В описании PR указать, что проверено на живой Станции Миди, а что — нет.
 

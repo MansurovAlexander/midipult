@@ -1041,6 +1041,11 @@ def test_llm_errors_and_models():
           llm.normalize_provider("") == "openai")
     check("ошибки: ключ в WRITE_KEYS",
           "error_messages_text" in common.WRITE_KEYS)
+    with open(os.path.join(HERE, "..", "version.json"), "r", encoding="utf-8") as fh:
+        project_version = json_mod.load(fh)["version"]
+    check("llm: User-Agent из version.json",
+          llm.USER_AGENT == "MidiPult/" + project_version,
+          llm.USER_AGENT)
 
     class FakeResponse:
         def __init__(self, payload):
