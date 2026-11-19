@@ -261,7 +261,7 @@ def main():
             "diagnostics": diagnostics,
             "websocket": common.websocket_available(),
             "glagol_url": common.GLAGOL_WS,
-            "hint": None if amixer else "Установите alsa-utils: yse install alsa-utils",
+            "hint": None if amixer else "Установите alsa-utils: opkg install alsa-utils",
         })
         return
 
@@ -278,7 +278,7 @@ def main():
                 501,
                 "Mute недоступен: микшер не найден",
                 detail={"amixer": amixer, "diagnostics": diagnostics},
-                hint="yse install alsa-utils",
+                hint="opkg install alsa-utils",
             )
             return
         if level is None and delta is None:
@@ -302,14 +302,14 @@ def main():
                 501,
                 "Громкость недоступна: amixer не найден, Glagol не ответил",
                 detail={"amixer": amixer, "glagol": error, "diagnostics": diagnostics},
-                hint="yse install alsa-utils  (и/или python3 -m pip install websocket-client)",
+                hint="opkg install alsa-utils  (и/или python3 -m pip install websocket-client)",
             )
             return
         common.fail(
             501,
             "Микшер не найден",
             detail={"amixer": amixer, "diagnostics": diagnostics},
-            hint="yse install alsa-utils",
+            hint="opkg install alsa-utils",
         )
         return
 
