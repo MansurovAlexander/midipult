@@ -1131,15 +1131,6 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       <button class="btn sm ghost" id="btnLlmSystem">Сохранить промпт</button>
     </div>
 
-    <label class="llm-field" style="margin-top:10px"><span>Свои сообщения об ошибках</span>
-      <textarea id="llmErrors" rows="3" maxlength="4000"
-        placeholder="По строке: код или тип ошибки = текст. Например: 402=Кончились деньги. Пусто — стандартные сообщения провайдера."></textarea>
-    </label>
-    <div class="row between" style="margin-top:6px">
-      <span class="seg-note" id="llmErrorsStatus">Стандартные сообщения</span>
-      <button class="btn sm ghost" id="btnLlmErrors">Сохранить сообщения</button>
-    </div>
-
     <div class="llm-grid">
       <label class="llm-field"><span>Провайдер</span>
         <select id="llmProviderSelect" aria-label="Провайдер"></select>
@@ -1164,6 +1155,15 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     <div class="row" style="margin-top:10px">
       <button class="btn sm" id="btnLlmSave">Сохранить</button>
       <span class="seg-note" id="llmStatus"></span>
+    </div>
+
+    <label class="llm-field" style="margin-top:10px"><span>Свои сообщения об ошибках (активный провайдер)</span>
+      <textarea id="llmErrors" rows="3" maxlength="4000"
+        placeholder="По строке: код или тип ошибки = текст. Например: 402=Кончились деньги. Пусто — вернуть сообщения провайдера."></textarea>
+    </label>
+    <div class="row between" style="margin-top:6px">
+      <span class="seg-note" id="llmErrorsStatus">Сообщения провайдера</span>
+      <button class="btn sm ghost" id="btnLlmErrors">Сохранить сообщения</button>
     </div>
     <div class="field" style="margin-top:12px">
       <textarea id="llmPrompt" placeholder="Спросите что-нибудь… Текстовые вопросы работают без голосового тумблера."></textarea>
@@ -3172,6 +3172,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   }
 
   var modelsCache = {};
+  var MODEL_BLOCK = /(text-embedding|embedding|embed-|whisper|transcrib|^tts-|dall-e|gpt-image|moderation|rerank|stable-diffusion|^flux|imagen|^veo|^sora|kling|seedream|nano-banana|recraft)/i;
 
   function fillModelOptions(models, selected) {
     el.llmModel.innerHTML = '';
@@ -3203,13 +3204,19 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
 
   function loadModels(selected) {
     var provider = currentProvider();
-    var cacheKey = provider ? provider.id : '';
+    if (!provider) return;
+    var base = (el.llmBase.value || '').trim();
+    var cacheKey = provider.id + '|' + base;
     if (modelsCache[cacheKey]) {
       fillModelOptions(modelsCache[cacheKey], selected);
       return;
     }
-    cgi('llm.py', { models: 1 }, { timeout: 20000 }).then(function (data) {
+    cgi('llm.py', { models: 1, provider: provider.id, base_url: base },
+      { timeout: 45000 }).then(function (data) {
       var models = (data && data.models) || [];
+      // В каталоге кроме чат-моделей есть embeddings, TTS, картинки и видео.
+      var chatOnly = models.filter(function (id) { return !MODEL_BLOCK.test(id); });
+      models = chatOnly.length ? chatOnly : models;
       if (!models.length) return;
       modelsCache[cacheKey] = models;
       fillModelOptions(models, selected || el.llmModel.value);
@@ -3267,10 +3274,16 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       : 'Голосовые вопросы: выкл · текст работает всегда';
   }
 
+  var lastActiveProfile = null;
+
   function applyProfile(profile) {
     if (!State.llm) return;
-    modelsCache = {};
-    State.llm.active = profile ? profile.id : null;
+    var activeId = profile ? profile.id : null;
+    if (activeId !== lastActiveProfile) {
+      modelsCache = {};
+      lastActiveProfile = activeId;
+    }
+    State.llm.active = activeId;
     if (profile) {
       State.llm.provider = profile.provider || 'openai';
       el.llmName.value = profile.name || '';
@@ -3327,7 +3340,9 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
       el.llmSystemStatus.textContent = data.system_prompt ? 'Свой промпт' : 'Стандартный промпт';
     }
     if (el.llmErrors) {
-      el.llmErrors.value = data.error_messages_text || '';
+      if (el.llmErrors.dataset.dirty !== '1') {
+        el.llmErrors.value = data.error_messages_text || '';
+      }
       el.llmErrorsStatus.textContent = data.error_messages_custom ? 'Свои сообщения' : 'Сообщения провайдера';
     }
     applyProfile(findProfile(data.active));
@@ -3395,6 +3410,7 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
   function saveLlmErrors() {
     var value = el.llmErrors.value;
     return cgi('llm.py', { error_messages_text: value }, { timeout: 15000 }).then(function (data) {
+      if (el.llmErrors) delete el.llmErrors.dataset.dirty;
       applyLlmInfo(data);
       toast(value ? 'Сообщения об ошибках сохранены' : 'Вернул стандартные сообщения', 'ok');
     }).catch(function (err) {
@@ -5960,6 +5976,11 @@ body.booting main.grid,body.booting .tabs,body.booting footer{visibility:hidden}
     el.btnLlmSave.addEventListener('click', saveLlm);
     el.btnLlmSystem.addEventListener('click', saveLlmSystem);
     el.btnLlmErrors.addEventListener('click', saveLlmErrors);
+    if (el.llmErrors) {
+      el.llmErrors.addEventListener('input', function () {
+        el.llmErrors.dataset.dirty = '1';
+      });
+    }
     el.btnLlmAsk.addEventListener('click', askLlm);
     el.btnLlmSay.addEventListener('click', sayLlmAnswer);
     el.llmPrompt.addEventListener('keydown', function (ev) {

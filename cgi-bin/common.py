@@ -205,6 +205,7 @@ WRITE_KEYS = frozenset({
     "append", "control", "ssid", "bssid", "psk", "max_volume", "delta",
     "chat_new", "chat_delete", "chat_rename", "chat_select", "chat_next",
     "chat_prev", "chat_name", "max_tokens", "system_prompt", "prompt",
+    "error_messages_text",
     "provider", "key", "base_url", "model", "profile_id", "text", "color",
 })
 WRITE_ACTIONS = frozenset({

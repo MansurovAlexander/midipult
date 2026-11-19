@@ -794,6 +794,106 @@ def test_voice_chat_actions():
         voice_daemon.llm_info = old_info
 
 
+def test_llm_errors_and_models():
+    import json as json_mod
+    import urllib.error
+
+    parsed = llm.parse_error_lines("402=Мало денег\n# коммент\n\n500=Сервис лёг")
+    check("ошибки: разбор строк", parsed == {"402": "Мало денег", "500": "Сервис лёг"},
+          str(parsed))
+
+    profile = {"provider": "aitunnel"}
+    check("ошибки: тип провайдера",
+          llm.error_text({}, profile, 402, "insufficient_balance")
+          == "Закончились деньги на балансе AITUNNEL")
+    check("ошибки: HTTP-код провайдера",
+          llm.error_text({}, profile, 429) == "Слишком много запросов к AITUNNEL")
+    check("ошибки: общий fallback",
+          llm.error_text({}, {"provider": "custom"}, 418)
+          == "Сервис нейросети не отвечает")
+    check("ошибки: свои правки важнее",
+          llm.error_text({"error_messages": {"aitunnel": "402=Своё"}},
+                         profile, 402, "insufficient_balance") == "Своё")
+    check("ошибки: legacy-текст",
+          llm.error_text({"error_messages_text": "429=Старое"},
+                         profile, 429, "rate_limited") == "Старое")
+    check("ошибки: пустой провайдер = openai",
+          llm.normalize_provider("") == "openai")
+    check("ошибки: ключ в WRITE_KEYS",
+          "error_messages_text" in common.WRITE_KEYS)
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def read(self, *args):
+            return self.payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    original = llm.urllib.request.urlopen
+
+    def fake_public(request, timeout=20):
+        return FakeResponse(json_mod.dumps({"chat": {"model-a": {}, "model-b": {}}}).encode("utf-8"))
+
+    try:
+        llm.urllib.request.urlopen = fake_public
+        models, source = llm.fetch_models({"provider": "aitunnel", "key": ""}, "aitunnel", "")
+        check("модели: публичный каталог без ключа",
+              source == "public" and models == ["model-a", "model-b"], str((source, models)))
+    finally:
+        llm.urllib.request.urlopen = original
+
+    def fake_key(request, timeout=20):
+        return FakeResponse(json_mod.dumps({"data": [{"id": "m1"}, {"id": "m2"}]}).encode("utf-8"))
+
+    try:
+        llm.urllib.request.urlopen = fake_key
+        models, source = llm.fetch_models(
+            {"provider": "aitunnel", "key": "k", "base_url": "https://api.aitunnel.ru/v1"},
+            "aitunnel", "")
+        check("модели: по ключу", source == "key" and models == ["m1", "m2"],
+              str((source, models)))
+    finally:
+        llm.urllib.request.urlopen = original
+
+    def fake_fail(request, timeout=20):
+        raise urllib.error.URLError("no net")
+
+    try:
+        llm.urllib.request.urlopen = fake_fail
+        models, source = llm.fetch_models({"provider": "openrouter", "key": ""},
+                                          "openrouter", "")
+        check("модели: встроенный fallback",
+              source == "builtin" and models == llm.PROVIDERS["openrouter"]["models"],
+              str((source, models)))
+    finally:
+        llm.urllib.request.urlopen = original
+
+
+def test_llm_profile_id():
+    config = {"profiles": [], "active": None}
+    data = {
+        "profile_id": "aitunnel",
+        "name": "AITUNNEL DeepSeek V4.1 Flash",
+        "provider": "aitunnel",
+        "model": "deepseek-v4.1-flash-1017",
+        "base_url": "https://api.aitunnel.ru/v1",
+        "key": "k",
+    }
+    first = llm.save_profile(config, data)
+    check("профиль: стабильный id из profile_id",
+          first.get("id") == "aitunnel", str(first))
+    llm.save_profile(config, dict(data, name="Другое имя"))
+    check("профиль: повторный запуск не плодит дубли",
+          len(config["profiles"]) == 1 and config["profiles"][0].get("id") == "aitunnel",
+          str(config["profiles"]))
+
+
 def main():
     for test in (
         test_generic_helpers,
@@ -817,6 +917,8 @@ def main():
         test_update_check_guard,
         test_update_fetch_release,
         test_llm_chat_names,
+        test_llm_errors_and_models,
+        test_llm_profile_id,
         test_voice_chat_commands,
         test_voice_chat_actions,
     ):
