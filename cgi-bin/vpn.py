@@ -369,14 +369,23 @@ def read_pid():
         return None
 
 
+def _cmdline(pid):
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as fh:
+            return fh.read().replace(b"\0", b" ").decode("utf-8", "replace")
+    except OSError:
+        return None
+
+
 def pid_alive(pid):
     if not pid:
         return False
     try:
         os.kill(pid, 0)
-        return True
     except OSError:
         return False
+    cmd = _cmdline(pid)
+    return True if cmd is None else "sing-box" in cmd
 
 
 def running():

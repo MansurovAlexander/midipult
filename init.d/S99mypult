@@ -47,6 +47,21 @@ is_listening() {
         /proc/net/tcp 2>/dev/null
 }
 
+# true, если pid существует и его cmdline содержит ожидаемое имя.
+# Нужно, чтобы после перезагрузки не убить чужой процесс с тем же pid.
+pid_matches() {
+    _pid="$1"
+    _needle="$2"
+    [ -n "$_pid" ] || return 1
+    kill -0 "$_pid" 2>/dev/null || return 1
+    [ -r "/proc/$_pid/cmdline" ] || return 0
+    _cmd=$(tr '\0' ' ' <"/proc/$_pid/cmdline" 2>/dev/null)
+    case "$_cmd" in
+        *"$_needle"*) return 0 ;;
+    esac
+    return 1
+}
+
 # true, если порт 8099 слушает не loopback (0.0.0.0/::).
 luna_on_lan() {
     _hex=$(printf '%04X' 8099)
@@ -140,7 +155,7 @@ start_voice() {
     [ -f /data/mypult/voice_daemon.py ] || return 0
     if [ -f /data/mypult/voice.pid ]; then
         _pid=$(cat /data/mypult/voice.pid 2>/dev/null)
-        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+        if pid_matches "$_pid" "voice_daemon.py"; then
             log "голосовой пульт: уже работает (pid $_pid)"
             return 0
         fi
@@ -152,7 +167,7 @@ start_voice() {
     sleep 2
     if [ -f /data/mypult/voice.pid ]; then
         _pid=$(cat /data/mypult/voice.pid 2>/dev/null)
-        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+        if pid_matches "$_pid" "voice_daemon.py"; then
             log "голосовой пульт: запущен (pid $_pid)"
             return 0
         fi
@@ -168,7 +183,11 @@ stop_voice() {
     fi
     if [ -f /data/mypult/voice.pid ]; then
         _pid=$(cat /data/mypult/voice.pid 2>/dev/null)
-        [ -n "$_pid" ] && kill "$_pid" 2>/dev/null
+        if pid_matches "$_pid" "voice_daemon.py"; then
+            kill "$_pid" 2>/dev/null
+        elif [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+            log "голосовой пульт: pid $_pid не совпал — не трогаю"
+        fi
         rm -f /data/mypult/voice.pid
     fi
 }
@@ -177,7 +196,7 @@ start_state() {
     [ -f /data/mypult/state_daemon.py ] || return 0
     if [ -f /tmp/mypult-state.pid ]; then
         _pid=$(cat /tmp/mypult-state.pid 2>/dev/null)
-        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+        if pid_matches "$_pid" "state_daemon.py"; then
             log "state: уже работает (pid $_pid)"
             return 0
         fi
@@ -185,7 +204,8 @@ start_state() {
     nohup /opt/bin/python3 /data/mypult/state_daemon.py >>/tmp/mypult.log 2>&1 &
     echo $! > /tmp/mypult-state.pid
     sleep 1
-    if kill -0 "$(cat /tmp/mypult-state.pid)" 2>/dev/null; then
+    _pid=$(cat /tmp/mypult-state.pid 2>/dev/null)
+    if pid_matches "$_pid" "state_daemon.py"; then
         log "state: запущен на 8057"
     else
         log "state: НЕ стартовал (панель использует CGI)"
@@ -195,7 +215,11 @@ start_state() {
 stop_state() {
     if [ -f /tmp/mypult-state.pid ]; then
         _pid=$(cat /tmp/mypult-state.pid 2>/dev/null)
-        [ -n "$_pid" ] && kill "$_pid" 2>/dev/null
+        if pid_matches "$_pid" "state_daemon.py"; then
+            kill "$_pid" 2>/dev/null
+        elif [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+            log "state: pid $_pid не совпал — не трогаю"
+        fi
         rm -f /tmp/mypult-state.pid
     fi
 }
@@ -230,9 +254,11 @@ stop_pidfile() {
     _name="$2"
     [ -f "$_file" ] || return 0
     _pid=$(cat "$_file" 2>/dev/null)
-    if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+    if pid_matches "$_pid" "$_name"; then
         kill "$_pid" 2>/dev/null
         log "$_name: остановлен (pid $_pid)"
+    elif [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then
+        log "$_name: pid $_pid не совпал — не трогаю"
     fi
     rm -f "$_file"
 }
@@ -260,7 +286,7 @@ start_ipv6() {
 reload_web() {
     # SIGHUP перечитывает конфиг без обрыва соединений — вкладки не отваливаются.
     pid=$(cat "$LIGHTTPD_PIDFILE" 2>/dev/null)
-    if [ -n "$pid" ] && kill -HUP "$pid" 2>/dev/null; then
+    if pid_matches "$pid" "lighttpd" && kill -HUP "$pid" 2>/dev/null; then
         sleep 1
         if is_listening 8055; then
             log "lighttpd: мягко перезагружен"
