@@ -1238,6 +1238,27 @@ def test_write_json_atomic():
         shutil.rmtree(folder, ignore_errors=True)
 
 
+def test_llm_chat_history_public():
+    chat = {
+        "id": "chat-1",
+        "name": "Работа",
+        "messages": [
+            {"role": "user", "content": "привет"},
+            {"role": "assistant", "content": "здравствуй"},
+            {"role": "system", "content": "не показывать"},
+        ],
+    }
+    short = llm.chat_public(chat)
+    check("чат: без истории только счётчик",
+          short.get("messages") == 3 and "history" not in short, str(short))
+    full = llm.chat_public(chat, True)
+    check("чат: история только user/assistant",
+          [item["role"] for item in full.get("history", [])] == ["user", "assistant"],
+          str(full))
+    check("чат: история сохраняет текст",
+          full["history"][0]["content"] == "привет", str(full))
+
+
 def main():
     for test in (
         test_generic_helpers,
@@ -1262,6 +1283,7 @@ def main():
         test_update_check_guard,
         test_update_fetch_release,
         test_llm_chat_names,
+        test_llm_chat_history_public,
         test_llm_errors_and_models,
         test_llm_response_parsing,
         test_llm_ask_requires_model,

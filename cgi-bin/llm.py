@@ -455,7 +455,8 @@ def info(config=None):
         "error_messages_custom": bool(stored),
         "config": public_profile(active),
         "max_tokens": int(config.get("max_tokens") or 260),
-        "chats": [chat_public(item) for item in chats.get("chats") or []],
+        "chats": [chat_public(item, item.get("id") == (chat.get("id") if chat else None))
+                  for item in chats.get("chats") or []],
         "active_chat": chat.get("id") if chat else None,
         "active_chat_name": chat.get("name") if chat else None,
     }
@@ -491,12 +492,23 @@ def active_chat(data):
     return (data.get("chats") or [None])[0]
 
 
-def chat_public(chat):
-    return {
+def chat_public(chat, with_history=False):
+    result = {
         "id": chat.get("id"),
         "name": chat.get("name"),
         "messages": len(chat.get("messages") or []),
     }
+    if with_history:
+        history = []
+        for message in (chat.get("messages") or [])[-20:]:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            content = message.get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                history.append({"role": role, "content": content[:4000]})
+        result["history"] = history
+    return result
 
 
 def voice_enabled(config):
