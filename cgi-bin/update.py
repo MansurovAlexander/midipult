@@ -67,8 +67,17 @@ def asset_guard(url):
 
 
 def api_guard(url):
-    """Только https и только api.github.com для запроса релизов."""
-    return _github_guard(url, API_HOSTS, "недопустимый хост API GitHub")
+    """Только https и только api.github.com для запроса релизов.
+
+    MYPULT_UPDATE_API — dev-переопределение: если задан, его хост тоже разрешён.
+    """
+    hosts = set(API_HOSTS)
+    override = str(os.environ.get("MYPULT_UPDATE_API") or "").strip()
+    if override:
+        host = urllib.parse.urlsplit(override).hostname
+        if host:
+            hosts.add(host)
+    return _github_guard(url, hosts, "недопустимый хост API GitHub")
 
 
 # --------------------------------------------------------------------------- #

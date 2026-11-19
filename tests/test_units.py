@@ -372,7 +372,7 @@ def test_url_guard():
                        allow_private=True, allow_loopback=True))
 
     handler = common.GuardedRedirectHandler(lambda url: url,
-                                            expected_host="api.example.com")
+                                            expected_host=("api.example.com", 443))
     request = urllib.request.Request("https://api.example.com/v1")
     try:
         handler.redirect_request(request, None, 302, "Found", {},
@@ -381,6 +381,14 @@ def test_url_guard():
     except ValueError:
         same_host_rejected = True
     check("ssrf: redirect на другой хост запрещён", same_host_rejected)
+
+    try:
+        common.open_url(urllib.request.Request("https://8.8.8.8/"),
+                        guard=lambda url: url, allow_private=True)
+        mixed_rejected = False
+    except TypeError:
+        mixed_rejected = True
+    check("ssrf: guard не сочетается с allow_*", mixed_rejected)
 
 
 def test_update_assets():
@@ -418,6 +426,21 @@ def test_update_assets():
           api_bad("https://github.com/x"))
     check("update: api_guard не пускает http",
           api_bad("http://api.github.com/x"))
+
+    old_env = os.environ.get("MYPULT_UPDATE_API")
+    os.environ["MYPULT_UPDATE_API"] = "https://api.example.com/releases"
+    old_guard = update.common.url_guard
+    try:
+        update.common.url_guard = lambda url, **kwargs: url
+        check("update: MYPULT_UPDATE_API разрешает свой хост",
+              update.api_guard("https://api.example.com/releases")
+              == "https://api.example.com/releases")
+    finally:
+        update.common.url_guard = old_guard
+        if old_env is None:
+            os.environ.pop("MYPULT_UPDATE_API", None)
+        else:
+            os.environ["MYPULT_UPDATE_API"] = old_env
 
 
 def test_state_player_fresh():
