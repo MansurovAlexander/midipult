@@ -1345,170 +1345,132 @@ def test_voice_recognize_query():
         voice_daemon._RECENT[:] = old_recent
 
 
-def test_voice_sound_files():
-    import tempfile
-
-    base = tempfile.mkdtemp(prefix="mypult-snd-")
-    data_root = os.path.join(base, "data")
-    system_root = os.path.join(base, "system")
-    os.makedirs(data_root)
-    os.makedirs(system_root)
-    old_roots = voice_daemon.SOUND_ROOTS
-    old_run = voice_daemon.subprocess.run
-    old_cue = voice_daemon.FOLLOW_UP_CUE
-    try:
-        voice_daemon.SOUND_ROOTS = (data_root, system_root)
-        system_file = os.path.join(system_root, "spotter_start.mp3")
-        data_file = os.path.join(data_root, "spotter_start.mp3")
-        with open(system_file, "wb") as fh:
-            fh.write(b"ID3system")
-        check("голос: звук найден в /system",
-              voice_daemon.sound_path("spotter_start") == system_file,
-              voice_daemon.sound_path("spotter_start"))
-        with open(data_file, "wb") as fh:
-            fh.write(b"ID3data")
-        check("голос: замена в /data важнее /system",
-              voice_daemon.sound_path("spotter_start") == data_file,
-              voice_daemon.sound_path("spotter_start"))
-        check("голос: неизвестный звук не найден",
-              voice_daemon.sound_path("нет-такого") == "")
-
-        calls = []
-
-        class FakeProc:
-            returncode = 0
-            stderr = b""
-
-        def fake_run(argv, **kwargs):
-            calls.append((argv, kwargs))
-            return FakeProc()
-
-        voice_daemon.subprocess.run = fake_run
-        voice_daemon.FOLLOW_UP_CUE = True
-        check("голос: звук играется через GStreamer",
-              voice_daemon.play_sound("spotter_start") is True)
-        check("голос: pipeline указывает на текущий файл",
-              bool(calls) and "spotter_start.mp3" in calls[0][0][-1]
-              and calls[0][0][0].endswith("maind"),
-              str(calls[0][0]) if calls else "")
-        voice_daemon.FOLLOW_UP_CUE = False
-        check("голос: cue можно отключить",
-              voice_daemon.play_sound("spotter_start") is False
-              and len(calls) == 1, str(calls))
-    finally:
-        voice_daemon.SOUND_ROOTS = old_roots
-        voice_daemon.subprocess.run = old_run
-        voice_daemon.FOLLOW_UP_CUE = old_cue
-        for root in (data_root, system_root):
-            for name in os.listdir(root):
-                os.remove(os.path.join(root, name))
-            os.rmdir(root)
-        os.rmdir(base)
-
-
-def test_voice_follow_up():
+def test_voice_follow_up_cli():
     import time
 
-    saved = (
-        voice_daemon.FOLLOW_UP_SECONDS,
-        voice_daemon.FOLLOW_UP_TURNS,
-        voice_daemon.FOLLOW_UP_TOTAL,
-        voice_daemon._LAST_LLM_AT,
-        list(voice_daemon._RECENT),
-    )
-    old_recognize = voice_daemon.recognize
+    saved = (voice_daemon.FOLLOW_UP_SECONDS, voice_daemon.FOLLOW_UP_TURNS,
+             list(voice_daemon._RECENT))
+    old_cli = voice_daemon.alice_cli
+    old_event = voice_daemon._speech_event
+    old_state = voice_daemon.alice_state
     old_handle = voice_daemon.handle
-    old_cue = voice_daemon.play_listen_cue
-    old_cancel = voice_daemon.play_cancel_cue
-    old_busy = voice_daemon.native_alice_busy
+    old_say = voice_daemon.say
+    old_stop = voice_daemon.stop_alice_speech
+
+    class FakeCli:
+        def __init__(self):
+            self.listens = 0
+            self.closes = 0
+            self.cancels = 0
+            self.close_cancel = []
+
+        def listen(self):
+            self.listens += 1
+
+        def close_session(self, cancel=True):
+            self.closes += 1
+            self.close_cancel.append(bool(cancel))
+
+        def cancel(self):
+            self.cancels += 1
+
     try:
+        fake = FakeCli()
+        voice_daemon.alice_cli = fake
         voice_daemon.FOLLOW_UP_SECONDS = 1
         voice_daemon.FOLLOW_UP_TURNS = 2
-        voice_daemon.FOLLOW_UP_TOTAL = 5
-        voice_daemon.native_alice_busy = lambda: False
-        cues = []
-        cancels = []
-        voice_daemon.play_listen_cue = lambda: cues.append(time.time())
-        voice_daemon.play_cancel_cue = lambda: cancels.append(time.time())
+        voice_daemon._RECENT[:] = []
+        voice_daemon.alice_state = lambda: "IDLE"
 
         heard = []
         phrases = ["второй вопрос", "третий вопрос"]
 
-        def fake_recognize(timeout=60, empty_on_timeout=False):
-            heard.append((timeout, empty_on_timeout))
-            return phrases.pop(0) if phrases else ""
+        def fake_event(timeout_ms=8000):
+            if phrases:
+                return {"transcript": phrases.pop(0), "final": True}
+            return {}
 
-        def fake_handle(text):
-            voice_daemon._LAST_LLM_AT = time.time()
-
-        voice_daemon.recognize = fake_recognize
-        voice_daemon.handle = fake_handle
-        voice_daemon._RECENT[:] = []
+        voice_daemon._speech_event = fake_event
+        voice_daemon.handle = lambda text, follow=True: heard.append((text, follow))
         voice_daemon.follow_up()
-        check("голос: follow-up не превышает лимит ходов",
-              len(heard) == 2, str(heard))
-        check("голос: follow-up слушает с empty_on_timeout",
-              all(item[1] is True and abs(item[0] - 1.0) <= 0.05 for item in heard),
+        check("голос: follow-up включает микрофон через CLI",
+              fake.listens == 2 and fake.closes == 2
+              and fake.close_cancel == [False, False],
+              "listen=%s close=%s cancel=%s" % (fake.listens, fake.closes,
+                                                fake.close_cancel))
+        check("голос: follow-up обрабатывает ходы без рекурсии",
+              heard == [("второй вопрос", False), ("третий вопрос", False)],
               str(heard))
-        check("голос: earcon перед каждым окном",
-              len(cues) == 2, str(cues))
-        check("голос: после речи нет звука отмены",
-              cancels == [], str(cancels))
-        check("голос: follow-up помнит последнюю фразу",
+        check("голос: follow-up помнит фразы",
               voice_daemon._is_recent_phrase("третий вопрос") is True)
+        check("голос: стоп-слово распознаётся",
+              voice_daemon.follow_up_wanted("Спасибо!") is True
+              and voice_daemon.follow_up_wanted("продолжай") is False)
 
+        fake2 = FakeCli()
+        voice_daemon.alice_cli = fake2
+        voice_daemon._RECENT[:] = []
+        said = []
+        voice_daemon.say = lambda text, append=1: said.append(text)
+        voice_daemon._speech_event = lambda timeout_ms=8000: {
+            "transcript": "спасибо", "final": True}
         heard[:] = []
-        cues[:] = []
+        voice_daemon.follow_up()
+        check("голос: стоп-слово закрывает окно",
+              said == ["Хорошо."] and heard == [] and fake2.listens == 1
+              and fake2.close_cancel == [False],
+              "%s/%s/%s" % (said, heard, fake2.close_cancel))
+
+        fake3 = FakeCli()
+        voice_daemon.alice_cli = fake3
+        voice_daemon._RECENT[:] = []
+        voice_daemon.FOLLOW_UP_SECONDS = 0.2
+
+        def quiet_event(timeout_ms=8000):
+            time.sleep(0.02)
+            return {}
+
+        voice_daemon._speech_event = quiet_event
+        heard[:] = []
+        started = time.time()
+        voice_daemon.follow_up()
+        check("голос: тишина закрывает окно без зависания",
+              heard == [] and fake3.listens == 1 and fake3.closes == 1
+              and fake3.close_cancel == [True]
+              and time.time() - started < 3.0,
+              "%.2f/%s/%s/%s" % (time.time() - started, fake3.listens,
+                                 fake3.closes, fake3.close_cancel))
+
+        fake4 = FakeCli()
+        voice_daemon.alice_cli = fake4
+        voice_daemon._RECENT[:] = []
         voice_daemon._remember_phrase("уже было")
-        voice_daemon.recognize = lambda timeout=60, empty_on_timeout=False: (
-            heard.append(timeout) or "уже было")
+        voice_daemon._speech_event = lambda timeout_ms=8000: {
+            "transcript": "уже было", "final": True}
+        heard[:] = []
         voice_daemon.follow_up()
         check("голос: повтор фразы закрывает окно",
-              len(heard) == 1, str(heard))
-        check("голос: повтор не играет отмену",
-              cancels == [], str(cancels))
+              heard == [] and fake4.listens == 1, "%s/%s" % (heard, fake4.listens))
 
-        heard[:] = []
-        cancels[:] = []
-        voice_daemon._RECENT[:] = []
-        voice_daemon.recognize = lambda timeout=60, empty_on_timeout=False: (
-            heard.append(timeout) or "")
-        voice_daemon.follow_up()
-        check("голос: тишина играет spotter_cancel",
-              len(cancels) == 1, "%s/%s" % (heard, cancels))
-
-        heard[:] = []
-        cancels[:] = []
-        voice_daemon._RECENT[:] = []
-        voice_daemon.recognize = lambda timeout=60, empty_on_timeout=False: (
-            heard.append(timeout) or "выключи впн")
-        voice_daemon.handle = lambda text: None
-        voice_daemon.follow_up()
-        check("голос: команда закрывает окно продолжения",
-              len(heard) == 1, str(heard))
-
-        heard[:] = []
-        cues[:] = []
-        voice_daemon.native_alice_busy = lambda: True
-        voice_daemon.follow_up()
-        check("голос: занятая Алиса не открывает окно",
-              heard == [] and cues == [], "%s/%s" % (heard, cues))
-
-        heard[:] = []
-        voice_daemon.native_alice_busy = lambda: False
+        fake5 = FakeCli()
+        voice_daemon.alice_cli = fake5
         voice_daemon.FOLLOW_UP_TURNS = 0
         voice_daemon.follow_up()
-        check("голос: нулевые ходы отключают окно", heard == [], str(heard))
+        check("голос: нулевые ходы отключают окно", fake5.listens == 0)
+
+        fake6 = FakeCli()
+        voice_daemon.alice_cli = fake6
+        voice_daemon.stop_alice_speech()
+        check("голос: отмена идёт через CLI", fake6.cancels == 1)
     finally:
-        voice_daemon.recognize = old_recognize
+        voice_daemon.alice_cli = old_cli
+        voice_daemon._speech_event = old_event
+        voice_daemon.alice_state = old_state
         voice_daemon.handle = old_handle
-        voice_daemon.play_listen_cue = old_cue
-        voice_daemon.play_cancel_cue = old_cancel
-        voice_daemon.native_alice_busy = old_busy
+        voice_daemon.say = old_say
+        voice_daemon.stop_alice_speech = old_stop
         (voice_daemon.FOLLOW_UP_SECONDS,
          voice_daemon.FOLLOW_UP_TURNS,
-         voice_daemon.FOLLOW_UP_TOTAL,
-         voice_daemon._LAST_LLM_AT,
          recent) = saved
         voice_daemon._RECENT[:] = recent
 
@@ -1677,8 +1639,7 @@ def main():
         test_voice_chat_commands,
         test_voice_chat_actions,
         test_voice_recognize_query,
-        test_voice_sound_files,
-        test_voice_follow_up,
+        test_voice_follow_up_cli,
         test_voice_env_clamps,
         test_voice_speaker_idle,
         test_voice_say_waits,
