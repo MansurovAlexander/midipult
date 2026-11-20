@@ -502,6 +502,26 @@ def test_llm_ui_cache():
           and "function renderLlmHistory" in html)
 
 
+def test_symlink_docroot_fix():
+    text = read(os.path.join(ROOT, "deploy", "install.sh"))
+    check("install: document-root через symlink /data",
+          "readlink -f \"$WEB\"" in text
+          and "server\\.document-root" in text
+          and "follow-symlink" in read(os.path.join(
+              ROOT, "lighttpd", "myweb.conf")),
+          "нет обхода симлинка /data — lighttpd отдаст 403")
+
+
+def test_autostart_shim():
+    auto = read(os.path.join(ROOT, "deploy", "autostart.sh"))
+    check("autostart: шим передаёт аргументы",
+          'exec /opt/etc/init.d/S99mypult "$@"' in auto,
+          "шим без \"$@\": stop/status через /etc/init.d запускают пульт")
+    check("autostart: старый шим перезаписывается",
+          "обновляю $SHIM" in auto and "grep -q '\"\\$@\"'" in auto,
+          "нет миграции старого шима")
+
+
 def test_uninstall_safety():
     text = read(os.path.join(ROOT, "deploy", "uninstall.sh"))
     check("uninstall: pid сверяется с cmdline",
@@ -532,6 +552,8 @@ def main():
         test_version,
         test_llm_ui_cache,
         test_uninstall_safety,
+        test_symlink_docroot_fix,
+        test_autostart_shim,
     ):
         try:
             test()

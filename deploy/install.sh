@@ -95,6 +95,18 @@ fi
 say "копирую конфиг lighttpd и init-скрипт"
 cp -f "$SRC/lighttpd/myweb.conf" "$CONF" || die "не скопировался myweb.conf"
 
+# На части прошивок /data — симлинк на /bkupgrade/data. lighttpd с
+# server.follow-symlink = "disable" не идёт по симлинкам и отдаёт 403 на всё,
+# если document-root указан через /data: панель «устанавливается», но проверка
+# по HTTP падает и self-update откатывается. Пишем в конфиг реальный путь —
+# хардening остаётся включённым. На обычной прошивке readlink вернёт тот же
+# /data/myweb, и конфиг не меняется.
+DOC_REAL=$(readlink -f "$WEB" 2>/dev/null || true)
+if [ -n "$DOC_REAL" ] && [ "$DOC_REAL" != "$WEB" ] && [ -d "$DOC_REAL" ]; then
+    say "document-root: $WEB -> $DOC_REAL (обход симлинка /data)"
+    sed -i "s#^server\.document-root.*#server.document-root = \"$DOC_REAL\"#" "$CONF"
+fi
+
 # /etc на прошивке обычно read-only: пробуем /etc/init.d, затем Entware
 # (/opt/etc/init.d — его запускает rc.unslung), затем кладём рядом с веб-рутом.
 INIT_TARGET="$INIT"

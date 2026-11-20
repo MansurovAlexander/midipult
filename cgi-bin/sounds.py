@@ -186,7 +186,7 @@ def _play_custom(sound_id):
     if not os.path.isfile(path):
         raise ValueError("свой звук не найден")
     env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = QUASAR + ":libs"
+    env["LD_LIBRARY_PATH"] = QUASAR + "/libs"
     try:
         proc = subprocess.run(
             [MAIND, "--gst-launch",
@@ -290,7 +290,7 @@ def _restore(rel):
 
 def _run_gst(pipeline):
     env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = QUASAR + ":libs"
+    env["LD_LIBRARY_PATH"] = QUASAR + "/libs"
     try:
         proc = subprocess.run([MAIND, "--gst-launch", pipeline],
                               cwd=QUASAR, env=env,
