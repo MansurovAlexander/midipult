@@ -1124,9 +1124,23 @@ def test_llm_response_parsing():
     check("ответ: текст из content", llm.chat_answer(body) == "ok")
     check("ответ: пустой content",
           llm.chat_answer({"choices": [{"message": {"content": None}}]}) == "")
-    check("ответ: reasoning как fallback",
+    check("ответ: reasoning не отдаётся как ответ",
           llm.chat_answer({"choices": [{"message": {
-              "content": None, "reasoning": "думал"}}]}) == "думал")
+              "content": None, "reasoning": "думал по-английски"}}]}) == "")
+    check("ответ: бюджет повтора после reasoning",
+          llm.retry_tokens(260) == 700 and llm.retry_tokens(700) == 1400
+          and llm.retry_tokens(1500) == 2000 and llm.retry_tokens("x") == 700)
+    check("ответ: reasoning отключается только у коротких/средних deepseek AITUNNEL",
+          llm.disable_reasoning("https://api.aitunnel.ru/v1",
+                                "deepseek-v4.1-flash-1017", 260) is True
+          and llm.disable_reasoning("https://api.aitunnel.ru/v1",
+                                    "deepseek-v4.1-flash-1017", 700) is True
+          and llm.disable_reasoning("https://api.aitunnel.ru/v1",
+                                    "deepseek-v4.1-flash-1017", 701) is False
+          and llm.disable_reasoning("https://api.aitunnel.ru/v1",
+                                    "sonar", 260) is False
+          and llm.disable_reasoning("https://api.openai.com/v1",
+                                    "deepseek-chat", 260) is False)
     check("ответ: массив частей",
           llm.chat_answer({"choices": [{"message": {"content": [
               {"type": "text", "text": "а"}, {"type": "text", "text": "б"}]}}]}) == "а б")
