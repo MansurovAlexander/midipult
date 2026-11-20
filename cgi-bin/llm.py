@@ -58,7 +58,8 @@ def chat_answer(body):
     """Текст ответа из OpenAI-совместимого тела.
 
     None — тело не похоже на chat/completions; "" — тело корректное, но модель
-    ничего не сказала (например, content: null без reasoning).
+    ничего не сказала (content: null). reasoning — внутренние рассуждения
+    (обычно на английском), ответом не считается.
     """
     if not isinstance(body, dict):
         return None
@@ -71,7 +72,10 @@ def chat_answer(body):
         return None
     answer = message.get("content")
     if answer is None:
-        answer = message.get("reasoning")
+        # reasoning — внутренние рассуждения модели, часто на английском.
+        # Говорить их пользователю нельзя: вызывающий повторит запрос с
+        # большим бюджетом (см. ask()) или отключит reasoning заранее.
+        return ""
     if isinstance(answer, list):
         parts = []
         for item in answer:
@@ -81,6 +85,32 @@ def chat_answer(body):
                 parts.append(item)
         answer = " ".join(parts)
     return str(answer or "").strip()
+
+
+def retry_tokens(current, ceiling=2000):
+    """Бюджет повтора, когда reasoning съел весь max_tokens."""
+    try:
+        value = int(current)
+    except (TypeError, ValueError):
+        value = 260
+    return min(ceiling, max(700, value * 2))
+
+
+def disable_reasoning(base_url, model, max_tokens):
+    """Отключать ли reasoning у deepseek-моделей AITUNNEL.
+
+    Для коротких и средних ответов (max_tokens <= 700): reasoning съедает
+    бюджет, content остаётся пустым (раньше озвучивался английский
+    reasoning), а поисковые ответы обрезаются. На длинных настройках
+    reasoning оставляем — он помогает качеству.
+    """
+    try:
+        tokens = int(max_tokens)
+    except (TypeError, ValueError):
+        tokens = 0
+    return ("aitunnel.ru" in str(base_url or "")
+            and "deepseek" in str(model or "").lower()
+            and tokens <= 700)
 
 
 def normalize_provider(provider):
@@ -580,57 +610,77 @@ def ask(prompt, system=None):
             "parameters": {"engine": "parallel", "mode": "basic",
                            "max_results": 3, "max_uses": 1},
         }]
-    request = urllib.request.Request(
-        base_url + "/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + profile["key"],
-            "User-Agent": USER_AGENT,
-        },
-        method="POST",
-    )
-    try:
+        # deepseek-модели AITUNNEL при коротком/среднем max_tokens тратят
+        # бюджет на reasoning: content остаётся пустым (английский reasoning
+        # раньше попадал в озвучку), а поисковые ответы обрезаются. До 700
+        # отключаем reasoning: reasoning_tokens=0, ответ сразу и на русском.
+        if disable_reasoning(base_url, model, payload["max_tokens"]):
+            payload["reasoning"] = {"effort": "none"}
+    def send():
+        request = urllib.request.Request(
+            base_url + "/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + profile["key"],
+                "User-Agent": USER_AGENT,
+            },
+            method="POST",
+        )
         with common.open_url(request, timeout=90, allow_http=True,
-                             allow_private=True, allow_loopback=True, same_host=True) as response:
-            body = read_json_response(response)
-    except urllib.error.HTTPError as exc:
-        raw = ""
-        try:
-            raw = exc.read(2000).decode("utf-8", "replace")
-        except OSError:
-            pass
-        hint = ""
-        etype = ""
-        ecode = ""
-        try:
-            data = json.loads(raw) if raw.strip() else {}
-            err = data.get("error") if isinstance(data, dict) else None
-            if isinstance(err, dict):
-                etype = str(err.get("type") or "")
-                ecode = str(err.get("code") or "")
-                message = str(err.get("message") or "").strip()
-                if message:
-                    hint = message
-        except (ValueError, TypeError):
-            pass
-        short = error_text(config, profile, exc.code, etype, ecode)
-        # Ошибка провайдера всегда отдаётся как 502: наружу не должны утекать
-        # 401/402 провайдера, которые не отличить от PIN/биллинга самого пульта.
-        common.fail(502, short, hint=hint[:300], detail=raw[:400],
-                    error_type=etype or None, provider_status=exc.code)
-        return
-    except ValueError as exc:
-        common.fail(502, "Неожиданный ответ API", detail=str(exc)[:200])
-        return
-    except (urllib.error.URLError, OSError) as exc:
-        common.fail(502, "Нет связи с сервисом нейросети",
-                    hint="Проверь интернет на колонке; если провайдер блокирует "
-                         "сеть, попробуй base_url https://ru-api.aitunnel.ru/v1",
-                    detail=str(exc)[:200])
-        return
+                             allow_private=True, allow_loopback=True,
+                             same_host=True) as response:
+            return read_json_response(response)
 
-    answer = chat_answer(body)
+    attempts = 0
+    while True:
+        try:
+            body = send()
+        except urllib.error.HTTPError as exc:
+            raw = ""
+            try:
+                raw = exc.read(2000).decode("utf-8", "replace")
+            except OSError:
+                pass
+            hint = ""
+            etype = ""
+            ecode = ""
+            try:
+                data = json.loads(raw) if raw.strip() else {}
+                err = data.get("error") if isinstance(data, dict) else None
+                if isinstance(err, dict):
+                    etype = str(err.get("type") or "")
+                    ecode = str(err.get("code") or "")
+                    message = str(err.get("message") or "").strip()
+                    if message:
+                        hint = message
+            except (ValueError, TypeError):
+                pass
+            short = error_text(config, profile, exc.code, etype, ecode)
+            # Ошибка провайдера всегда отдаётся как 502: наружу не должны утекать
+            # 401/402 провайдера, которые не отличить от PIN/биллинга самого пульта.
+            common.fail(502, short, hint=hint[:300], detail=raw[:400],
+                        error_type=etype or None, provider_status=exc.code)
+            return
+        except ValueError as exc:
+            common.fail(502, "Неожиданный ответ API", detail=str(exc)[:200])
+            return
+        except (urllib.error.URLError, OSError) as exc:
+            common.fail(502, "Нет связи с сервисом нейросети",
+                        hint="Проверь интернет на колонке; если провайдер блокирует "
+                             "сеть, попробуй base_url https://ru-api.aitunnel.ru/v1",
+                        detail=str(exc)[:200])
+            return
+
+        answer = chat_answer(body)
+        # Модель с reasoning (например, AITUNNEL deepseek) при коротком
+        # max_tokens тратит весь бюджет на размышления и не оставляет content.
+        # Повторяем с большим бюджетом, иначе говорить нечего.
+        if answer != "" or attempts >= 1 or payload["max_tokens"] >= 2000:
+            break
+        payload["max_tokens"] = retry_tokens(payload["max_tokens"])
+        attempts += 1
+
     if answer is None:
         common.fail(502, "Неожиданный ответ API", detail=str(body)[:400])
         return
